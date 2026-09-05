@@ -1,0 +1,47 @@
+import React from 'react';
+import type { Metadata, Viewport } from 'next';
+import { Plus_Jakarta_Sans } from 'next/font/google';
+import { Toaster } from 'sonner';
+import '../styles/tailwind.css';
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-plus-jakarta-sans',
+  display: 'swap',
+});
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+};
+
+export const metadata: Metadata = {
+  title: 'LabelGuard AI — See the Label. Understand the Risk.',
+  description:
+    'AI-powered visual compliance inspection for packaged product labels. Extract declarations, map evidence, and get explainable findings in seconds.',
+  icons: {
+    icon: [{ url: '/favicon.ico', type: 'image/x-icon' }],
+  },
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html lang="en" className={plusJakartaSans.variable} suppressHydrationWarning>
+      <body className={plusJakartaSans.className}>
+        {children}
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              fontFamily: 'var(--font-plus-jakarta-sans)',
+              fontSize: '14px',
+            },
+          }}
+        />
+</body>
+    </html>
+  );
+}
