@@ -99,10 +99,7 @@ async function payForAnalysis() {
 }
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader(
-  "Access-Control-Allow-Origin",
-  process.env.FRONTEND_URL || "*"
-);
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Content-Type", "application/json");
