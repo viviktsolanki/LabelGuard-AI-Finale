@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
- "scripts": {
+  "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "client": "node client.js"
-   },
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -17,6 +17,7 @@
     "@x402/avm": "^2.25.0",
     "@x402/core": "^2.25.0",
     "@x402/fetch": "^2.25.0",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "hono": "^4.13.7"
   }
 }
