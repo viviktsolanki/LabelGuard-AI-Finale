@@ -1,70 +1,189 @@
 'use client';
 
-import React, { Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Bot, CheckCircle2, Info, ShieldCheck } from 'lucide-react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowLeft, Bot, Info } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
-import { getProductById } from '@/lib/mockData';
+import CopilotChatPanel from '@/components/copilot/CopilotChatPanel';
+import { isRealUploadId, resolveProductById } from '@/lib/realProduct';
+import {
+  buildProductContext,
+  resolveFocusFinding,
+  type CopilotProductContext,
+} from '@/lib/copilotContext';
+import { useAskLabelGuard } from '@/lib/useAskLabelGuard';
+import { useCopilotLanguage } from '@/lib/useCopilotLanguage';
+
+const PRODUCT_SUGGESTIONS = [
+  'Why did my product get this result?',
+  'What should I fix first?',
+  'Summarize my report.',
+  'What information is missing?',
+];
+
+const GENERAL_SUGGESTIONS = [
+  'How do I scan a product?',
+  'How do I use the Compliance Map?',
+  'How do I compare products?',
+  'How do I export a report?',
+];
 
 function CopilotContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const productId = searchParams.get('product') || 'product-b-001';
-  const findingId = searchParams.get('finding');
-  const product = getProductById(productId);
-  const declaration = product?.declarations.find((d) => d.id === findingId) || product?.declarations[0];
-  const finding = declaration ? product?.findings.find((f) => f.declarationId === declaration.id) : undefined;
 
-  if (!product || !declaration) {
+  // No fallback to a demo product id: a missing/unresolvable `?product=`
+  // must surface honestly rather than silently opening a demo product's
+  // Ask LabelGuard as if it were the user's real scan.
+  const productId = searchParams.get('product');
+  const findingId = searchParams.get('finding');
+
+  // Real scans live only in this browser's localStorage (see
+  // realProduct.ts), which doesn't exist during SSR. Resolving `product`
+  // straight from `resolveProductById` in the render body would make the
+  // server's render (no localStorage → no product) and the client's very
+  // first hydration render (localStorage already available → real product
+  // found) diverge, which is exactly what triggers a hydration mismatch.
+  // `mounted` starts `false` on both server and client and only flips
+  // after the client has committed the first render, so the initial
+  // render — server AND client's first pass — is guaranteed identical;
+  // the real localStorage-backed lookup only happens afterwards.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const product = useMemo(
+    () => (mounted ? resolveProductById(productId) : undefined),
+    [mounted, productId]
+  );
+  // Gated on `mounted` too: before the real lookup has run, we don't yet
+  // know whether the product exists, so this must not read as "missing".
+  const productUnavailable = mounted && Boolean(productId) && !product;
+  const isRealScan = isRealUploadId(productId);
+
+  const focus = useMemo(
+    () => (product ? resolveFocusFinding(product, findingId) : null),
+    [product, findingId]
+  );
+
+  const productContext = useMemo<CopilotProductContext | null>(
+    () => (product ? buildProductContext(product, isRealScan, focus?.declaration.id) : null),
+    [product, isRealScan, focus]
+  );
+
+  // Shared language state — same choice persists across this page, the
+  // Scan Copilot widget, and reloads (see useCopilotLanguage).
+  const { language, setLanguage } = useCopilotLanguage();
+
+  // Shared chat/AI-request logic — same hook the Scan Copilot widget
+  // uses, so there is exactly one implementation of "talk to the API".
+  const { messages, input, setInput, loading, sendToAssistant } = useAskLabelGuard({
+    assistantMode: 'copilot',
+    productContext,
+    productId: product?.id ?? null,
+    language,
+  });
+
+  const autoAskedRef = React.useRef(false);
+
+  // "Ask LabelGuard about this finding" arrives here with a specific
+  // finding already selected — ask about it automatically once so the
+  // click immediately produces an explanation, instead of an empty chat.
+  useEffect(() => {
+    if (autoAskedRef.current || !focus) return;
+    autoAskedRef.current = true;
+    sendToAssistant(
+      `Why was "${focus.declaration.field}" marked ${focus.declaration.status}? Explain using the evidence for this finding.`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
+
+  const suggestions = product ? PRODUCT_SUGGESTIONS : GENERAL_SUGGESTIONS;
+
+  // Deterministic, storage-independent shell — identical on the server and
+  // on the client's first render, before `mounted` flips to true. Every
+  // hook above still runs on every render regardless of this branch, so
+  // hook order stays stable; only the JSX output is gated here.
+  if (!mounted) {
     return (
       <AppLayout currentRoute="/">
-        <div className="max-w-lg mx-auto py-20 text-center space-y-4">
-          <Info size={48} className="text-review mx-auto" />
-          <h1 className="text-xl font-bold text-navy">Finding unavailable</h1>
-          <p className="text-sm text-muted-foreground">Run a demo inspection first to ask LabelGuard about a finding.</p>
-          <button onClick={() => router.push('/')} className="btn-primary">Back to Scan</button>
+        <div className="max-w-3xl mx-auto flex flex-col h-[calc(100dvh-8rem)] min-h-[520px] items-center justify-center gap-3">
+          <Bot size={28} className="text-accent" />
+          <p className="text-sm text-muted-foreground">Loading Ask LabelGuard…</p>
         </div>
       </AppLayout>
     );
   }
 
-  const statusClass = declaration.status === 'PASS' ? 'text-pass' : declaration.status === 'REVIEW' ? 'text-review' : 'text-flag';
-
   return (
     <AppLayout currentRoute="/">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.back()} className="btn-ghost p-2 rounded-lg" aria-label="Go back"><ArrowLeft size={17} /></button>
-          <div>
-            <div className="flex items-center gap-2"><Bot size={20} className="text-accent" /><h1 className="text-2xl font-extrabold text-navy">Ask LabelGuard</h1></div>
-            <p className="text-sm text-muted-foreground mt-1">Evidence-first explanation for {product.name}</p>
+      <div className="max-w-3xl mx-auto flex flex-col h-[calc(100dvh-8rem)] min-h-[520px]">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-4 flex-shrink-0">
+          <button
+            onClick={() => router.back()}
+            className="btn-ghost p-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={17} />
+          </button>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Bot size={20} className="text-accent" />
+              <h1 className="text-2xl font-extrabold text-navy">Ask LabelGuard</h1>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1 truncate">
+              {product
+                ? `Chatting about ${product.name}${isRealScan ? '' : ' (demo product)'}`
+                : 'General website & compliance guidance'}
+            </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="card p-5 md:col-span-1 space-y-4">
-            <div><p className="section-label">Selected finding</p><h2 className="text-lg font-bold text-navy mt-1">{declaration.field}</h2><span className={`status-badge mt-2 inline-flex ${declaration.status === 'PASS' ? 'badge-pass' : declaration.status === 'REVIEW' ? 'badge-review' : 'badge-flag'}`}>{declaration.status}</span></div>
-            <div className="p-3 rounded-xl bg-muted/50"><p className="text-xs text-muted-foreground">Detected text</p><p className="text-sm font-bold text-navy mt-1">{declaration.extractedText || 'Not detected'}</p></div>
-            <div className="p-3 rounded-xl bg-muted/50"><p className="text-xs text-muted-foreground">Confidence</p><p className={`text-lg font-extrabold mt-1 ${statusClass}`}>{declaration.confidence}%</p></div>
+        {productUnavailable && (
+          <div className="card p-4 mb-4 border-review-border bg-review-bg flex items-start gap-3 flex-shrink-0">
+            <Info size={18} className="text-review flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-navy">
+              We couldn&rsquo;t load that product record — it may have been cleared from this
+              browser, or the link is out of date. Ask LabelGuard can still help with general
+              questions about using the site.
+            </p>
           </div>
+        )}
 
-          <div className="card p-6 md:col-span-2 space-y-5">
-            <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0"><Bot size={20} className="text-accent" /></div><div><p className="font-bold text-navy">Why was this finding marked {declaration.status}?</p><p className="text-sm text-muted-foreground mt-1">LabelGuard explains the configured screening check using the evidence already mapped to the label.</p></div></div>
-            <div className="p-4 rounded-xl border border-border bg-card space-y-3"><div className="flex items-center gap-2 text-sm font-semibold text-navy"><ShieldCheck size={16} className="text-accent" /> Compliance check</div><p className="text-sm text-muted-foreground">{declaration.ruleCheck}</p></div>
-            <div className="p-4 rounded-xl bg-muted/50 space-y-2"><p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Explanation</p><p className="text-sm leading-relaxed text-foreground">{finding?.explanation || declaration.explanation}</p></div>
-            <div className="p-4 rounded-xl border border-accent/20 bg-accent/5 space-y-2"><p className="text-xs font-bold uppercase tracking-wide text-accent">Recommended verification</p><p className="text-sm leading-relaxed text-navy">{finding?.recommendation || declaration.recommendedAction}</p></div>
-            <div className="flex items-start gap-2 text-xs text-muted-foreground"><CheckCircle2 size={14} className="text-pass mt-0.5 flex-shrink-0" /><span>AI-assisted screening support only. An authorized official should make the final compliance determination.</span></div>
-          </div>
-        </div>
+        <CopilotChatPanel
+          messages={messages}
+          loading={loading}
+          input={input}
+          onInputChange={setInput}
+          onSend={sendToAssistant}
+          suggestions={suggestions}
+          placeholder={product ? "Ask about this product's report…" : 'Ask how to use LabelGuard…'}
+          emptyStateText={
+            product
+              ? `Ask about ${product.name}\u2019s findings, what to fix first, or how to use the site.`
+              : 'Ask how to use LabelGuard, or open a scan to ask about your own results.'
+          }
+          language={language}
+          onLanguageChange={setLanguage}
+        />
       </div>
     </AppLayout>
   );
 }
 
-
 export default function CopilotPage() {
   return (
-    <Suspense fallback={<AppLayout currentRoute="/"><div className="max-w-lg mx-auto py-20 text-center text-sm text-muted-foreground">Loading LabelGuard…</div></AppLayout>}>
+    <Suspense
+      fallback={
+        <AppLayout currentRoute="/">
+          <div className="max-w-lg mx-auto py-20 text-center text-sm text-muted-foreground">
+            Loading LabelGuard…
+          </div>
+        </AppLayout>
+      }
+    >
       <CopilotContent />
     </Suspense>
   );

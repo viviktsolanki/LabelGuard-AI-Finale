@@ -2,11 +2,75 @@
 
 export type DeclarationStatus = 'PASS' | 'REVIEW' | 'FLAG';
 
+/** Which uploaded image (front or back) a piece of evidence belongs to. */
+export type ImageSide = 'front' | 'back';
+
+/**
+ * Optional additional product views beyond front/back — side panels, top,
+ * bottom, close-ups, etc. The user never classifies these; they are always
+ * generic, numbered slots. Capped at MAX_ADDITIONAL_IMAGES.
+ */
+export type AdditionalImageId = 'additional-1' | 'additional-2' | 'additional-3' | 'additional-4';
+
+export const ADDITIONAL_IMAGE_IDS: AdditionalImageId[] = [
+  'additional-1',
+  'additional-2',
+  'additional-3',
+  'additional-4',
+];
+
+export const MAX_ADDITIONAL_IMAGES = ADDITIONAL_IMAGE_IDS.length;
+
+/**
+ * Any image a piece of evidence can belong to: the required front/back
+ * pair, or one of the optional additional views. Kept as a superset of
+ * `ImageSide` so existing front/back-only code paths remain valid.
+ */
+export type ImageId = ImageSide | AdditionalImageId;
+
+export const isAdditionalImageId = (id: string): id is AdditionalImageId =>
+  (ADDITIONAL_IMAGE_IDS as string[]).includes(id);
+
+/** User-facing label for an image id. Internal ids (e.g. `additional-1`)
+ * are never shown to the user — always display via this helper. */
+export const imageLabelFor = (id: ImageId | string): string => {
+  if (id === 'front') return 'Front';
+  if (id === 'back') return 'Back';
+
+  const match = /^additional-([1-4])$/.exec(id);
+  if (match) return `View ${match[1]}`;
+
+  return id;
+};
+
+/** A single optional additional product view (side panel, top, bottom,
+ * close-up, etc). Stored alongside the required front/back images. */
+export interface AdditionalImage {
+  id: AdditionalImageId;
+  url: string;
+  alt: string;
+  /** Timestamp (seconds into the source video) this view was extracted
+   * from, if it came from Phase 4A's smart video frame selection instead
+   * of a manual photo/camera capture. Null/undefined for a manually
+   * provided image — never invented when the real provenance is unknown. */
+  videoTimestampSeconds?: number | null;
+}
+
 export interface BoundingBox {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+/**
+ * A real, AI-located evidence region on ONE specific image (front, back, or
+ * an optional additional view). `null` when the AI could not confidently
+ * locate the declaration — the UI must show "Evidence location unavailable"
+ * rather than a fake box.
+ */
+export interface EvidenceRegion extends BoundingBox {
+  image: ImageId;
 }
 
 export interface Declaration {
@@ -17,8 +81,16 @@ export interface Declaration {
   /** Alias for value — used in evidence display */
   extractedText: string;
   confidence: number;
+  /**
+   * @deprecated legacy demo-only placeholder box, kept for the existing
+   * mockData.ts demo products. Real uploads should use `evidence` instead.
+   */
   boundingBox: BoundingBox;
+  /** Real AI-detected evidence location, or null if not confidently located. */
+  evidence?: EvidenceRegion | null;
   sourceRegion: string;
+  /** Which image(s) this declaration's value was found on. */
+  source?: ImageId | 'both' | null;
   readabilityPx: number;
   readabilityLabel: 'GOOD' | 'ACCEPTABLE' | 'LOW';
   status: DeclarationStatus;
@@ -63,8 +135,21 @@ export interface ProductAnalysis {
   id: string;
   name: string;
   category: string;
+  /** Front-of-package image. For demo products this is the only image. */
   imageUrl: string;
   imageAlt: string;
+  /** Back-of-package image — only present for real uploads (front+back). */
+  backImageUrl?: string;
+  backImageAlt?: string;
+  /** Timestamp (seconds into the source video) the front/back image was
+   * extracted from, if it came from Phase 4A's smart video frame
+   * selection instead of a manual photo/camera capture. Null/undefined
+   * for a manually provided image. */
+  frontVideoTimestampSeconds?: number | null;
+  backVideoTimestampSeconds?: number | null;
+  /** Optional additional views (side panels, top, bottom, close-ups) —
+   * only present for real uploads where the user added extra views. */
+  additionalImages?: AdditionalImage[];
   analyzedAt: string;
   /** Compliance Screening Score 0–100 */
   qualityScore: number;
@@ -74,6 +159,8 @@ export interface ProductAnalysis {
   passCount: number;
   reviewCount: number;
   flagCount: number;
+  /** Raw AI extraction JSON string — only present for real uploads. Shown behind a "Technical details" toggle. */
+  rawAiExtraction?: string;
 }
 
 // ─── PRODUCT A — COMPLIANT: Sunrise Basmati Rice ─────────────────────────────

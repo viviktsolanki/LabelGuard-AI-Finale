@@ -160,9 +160,9 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/80 backdrop-blur-sm p-4">
-      <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-hidden">
+      <div className="bg-card rounded-2xl shadow-2xl border border-border w-full max-w-lg max-h-[90dvh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
             <Camera size={18} className="text-accent" />
             <span className="font-bold text-navy text-sm">Camera Capture</span>
@@ -177,7 +177,7 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto">
           {/* IDLE — prompt to start */}
           {cameraState === 'idle' && (
             <div className="flex flex-col items-center gap-5 py-8">

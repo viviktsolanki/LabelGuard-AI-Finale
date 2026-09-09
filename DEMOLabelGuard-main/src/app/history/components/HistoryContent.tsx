@@ -1,18 +1,34 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { History, Search, CheckCircle2, AlertCircle, XCircle, ArrowRight, Calendar, Tag } from 'lucide-react';
+import { History, Search, CheckCircle2, AlertCircle, XCircle, ArrowRight, Calendar, Tag, ScanLine } from 'lucide-react';
 import { DEMO_PRODUCTS, type ProductAnalysis } from '@/lib/mockData';
+import { getAllRealProducts } from '@/lib/realProduct';
 
-// Extend demo products with extra history entries using the same data model
-const HISTORY_ITEMS: (ProductAnalysis & { scanDate: string })[] = [
-  { ...DEMO_PRODUCTS[1], id: 'product-b-001', scanDate: '29 Aug 2026, 17:15' },
-  { ...DEMO_PRODUCTS[0], id: 'product-a-001', scanDate: '29 Aug 2026, 14:42' },
-  { ...DEMO_PRODUCTS[2], id: 'product-c-001', scanDate: '29 Aug 2026, 11:08' },
+interface HistoryItem extends ProductAnalysis {
+  scanDate: string;
+  /** The id to link to on the Compliance Map / Report / Compare pages.
+   * For demo variations below this differs from `id` (see comment at
+   * DEMO_HISTORY_ITEMS); for real scans it's always the same as `id`. */
+  linkId: string;
+  isReal: boolean;
+}
+
+// Extend demo products with extra history entries using the same data
+// model. These ids (e.g. `product-a-002`) are cosmetic variations for demo
+// purposes only — they don't exist as separate ProductAnalysis records, so
+// `linkId` maps them back to the real demo product id (`-001`) that the
+// Compliance Map / Report / Compare pages can actually resolve.
+const DEMO_HISTORY_ITEMS: HistoryItem[] = [
+  { ...DEMO_PRODUCTS[1], id: 'product-b-001', linkId: 'product-b-001', isReal: false, scanDate: '29 Aug 2026, 17:15' },
+  { ...DEMO_PRODUCTS[0], id: 'product-a-001', linkId: 'product-a-001', isReal: false, scanDate: '29 Aug 2026, 14:42' },
+  { ...DEMO_PRODUCTS[2], id: 'product-c-001', linkId: 'product-c-001', isReal: false, scanDate: '29 Aug 2026, 11:08' },
   {
     ...DEMO_PRODUCTS[0],
     id: 'product-a-002',
+    linkId: 'product-a-001',
+    isReal: false,
     name: 'Sunrise Basmati Rice 5kg',
     qualityScore: 91,
     passCount: 7,
@@ -23,6 +39,8 @@ const HISTORY_ITEMS: (ProductAnalysis & { scanDate: string })[] = [
   {
     ...DEMO_PRODUCTS[1],
     id: 'product-b-002',
+    linkId: 'product-b-001',
+    isReal: false,
     name: 'NutriMax Muesli 400g',
     qualityScore: 72,
     passCount: 4,
@@ -33,6 +51,8 @@ const HISTORY_ITEMS: (ProductAnalysis & { scanDate: string })[] = [
   {
     ...DEMO_PRODUCTS[2],
     id: 'product-c-002',
+    linkId: 'product-c-001',
+    isReal: false,
     name: 'CleanHome Floor Cleaner 1L',
     qualityScore: 78,
     passCount: 5,
@@ -82,8 +102,27 @@ function getOverallStatus(item: ProductAnalysis): 'PASS' | 'REVIEW' | 'FLAG' {
 
 export default function HistoryContent() {
   const [query, setQuery] = useState('');
+  const [realItems, setRealItems] = useState<HistoryItem[]>([]);
 
-  const filtered = HISTORY_ITEMS.filter(
+  // Real scans live in localStorage — only readable client-side, so they're
+  // loaded after mount. Every successful real analysis is already saved by
+  // saveRealProduct() during the analysis step, so simply reading all of
+  // them here is enough to make them show up in History.
+  useEffect(() => {
+    const real = getAllRealProducts().map((p) => ({
+      ...p,
+      linkId: p.id,
+      isReal: true,
+      scanDate: p.analyzedAt,
+    }));
+    setRealItems(real);
+  }, []);
+
+  // Real scans first (most recent first, already the order getAllRealProducts
+  // returns), demo entries after.
+  const historyItems: HistoryItem[] = [...realItems, ...DEMO_HISTORY_ITEMS];
+
+  const filtered = historyItems.filter(
     (item) =>
       item.name.toLowerCase().includes(query.toLowerCase()) ||
       item.category.toLowerCase().includes(query.toLowerCase())
@@ -122,10 +161,10 @@ export default function HistoryContent() {
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Total Scans', value: HISTORY_ITEMS.length, color: 'text-navy' },
-          { label: 'Avg. Score', value: Math.round(HISTORY_ITEMS.reduce((s, i) => s + i.qualityScore, 0) / HISTORY_ITEMS.length), color: 'text-accent' },
-          { label: 'With FLAGS', value: HISTORY_ITEMS.filter(i => i.flagCount > 0).length, color: 'text-flag' },
-          { label: 'All PASS', value: HISTORY_ITEMS.filter(i => i.flagCount === 0 && i.reviewCount === 0).length, color: 'text-pass' },
+          { label: 'Total Scans', value: historyItems.length, color: 'text-navy' },
+          { label: 'Avg. Score', value: historyItems.length ? Math.round(historyItems.reduce((s, i) => s + i.qualityScore, 0) / historyItems.length) : 0, color: 'text-accent' },
+          { label: 'With FLAGS', value: historyItems.filter(i => i.flagCount > 0).length, color: 'text-flag' },
+          { label: 'All PASS', value: historyItems.filter(i => i.flagCount === 0 && i.reviewCount === 0).length, color: 'text-pass' },
         ].map((stat) => (
           <div key={stat.label} className="card p-4 text-center">
             <p className={`text-2xl font-extrabold ${stat.color}`}>{stat.value}</p>
@@ -143,14 +182,13 @@ export default function HistoryContent() {
         )}
         {filtered.map((item) => {
           const overallStatus = getOverallStatus(item);
-          // Map history item id back to a real product id for compliance map
-          const complianceMapId = item.id.replace(/-\d{3}$/, '-001');
           return (
             <Link
               key={item.id}
-              href={`/compliance-map?product=${complianceMapId}`}
-              className="card p-4 flex items-center gap-4 hover:border-accent/50 hover:shadow-md transition-all group"
+              href={`/compliance-map?product=${item.linkId}`}
+              className="card p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 hover:border-accent/50 hover:shadow-md transition-all group"
             >
+              <div className="flex items-center gap-4 min-w-0">
               {/* Score */}
               <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-muted flex flex-col items-center justify-center">
                 <span className={`text-lg font-extrabold leading-none ${item.qualityScore >= 85 ? 'text-pass' : item.qualityScore >= 70 ? 'text-review' : 'text-flag'}`}>
@@ -166,6 +204,15 @@ export default function HistoryContent() {
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-medium">
                     <Tag size={9} /> {item.category}
                   </span>
+                  {item.isReal ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/10 text-accent text-xs font-semibold">
+                      <ScanLine size={9} /> Real scan
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+                      Demo
+                    </span>
+                  )}
                   {/* Overall status badge */}
                   {overallStatus === 'FLAG' && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-flag/10 text-flag text-xs font-semibold">
@@ -190,9 +237,10 @@ export default function HistoryContent() {
                   {item.flagCount > 0 && <StatusBadge count={item.flagCount} type="flag" />}
                 </div>
               </div>
+              </div>
 
               {/* Date + arrow */}
-              <div className="flex-shrink-0 flex flex-col items-end gap-2">
+              <div className="flex-shrink-0 flex items-center justify-between sm:flex-col sm:items-end gap-2 pl-16 sm:pl-0">
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Calendar size={11} />
                   {item.scanDate}

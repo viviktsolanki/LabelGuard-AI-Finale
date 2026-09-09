@@ -3,27 +3,83 @@
 import React, { useState, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
-import { getProductById, type Declaration, type Finding } from '@/lib/mockData';
+import { type ImageId } from '@/lib/mockData';
+import { resolveProductById } from '@/lib/realProduct';
 import ProductImageMap from './ProductImageMap';
 import FindingsPanel from './FindingPanel';
 import QualityScoreCard from './QualityScoreCard';
 import FindingDetailPanel from './FindingDetailPanel';
 import ReadabilityTable from './ReadabilityTab';
 import ComplianceMapToolbar from './ComplianceMapToolbar';
+import ResultsSummary from './ResultsSummary';
 
 export default function ComplianceMapContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const productId = searchParams.get('product') || 'product-b-001';
-  const product = getProductById(productId);
+  const productId = searchParams.get('product');
 
-  const [selectedDeclarationId, setSelectedDeclarationId] = useState<string | null>(null);
+  // Real uploads are stored client-side (localStorage) keyed by a
+  // `real-upload-...` id; everything else falls back to the existing
+  // mockData.ts deterministic demo products. resolveProductById is the
+  // single shared lookup used by every page keyed by product id.
+  //
+  // IMPORTANT: there is deliberately NO fallback to a demo product id here.
+  // A missing/unresolvable `?product=` id must show an honest "not found"
+  // state — silently substituting a demo product would mean a broken link
+  // to a real scan (e.g. a failed save, a stale bookmark, direct navigation
+  // without the id) quietly shows someone else's demo data instead.
+  const product = resolveProductById(productId);
+
+  // Optional deep-link to a specific finding, e.g. `?finding=decl-b-004`.
+  // Only read once on mount (declarationId is looked up against the
+  // already-resolved `product` below); absent in the overwhelming
+  // majority of links, in which case this is exactly the previous
+  // behavior (selectedDeclarationId starts null).
+  const initialFindingId = searchParams.get('finding');
+  const [selectedDeclarationId, setSelectedDeclarationId] = useState<string | null>(
+    () =>
+      (initialFindingId &&
+        product?.declarations.some((d) => d.id === initialFindingId) &&
+        initialFindingId) ||
+      null
+  );
   const [hoveredDeclarationId, setHoveredDeclarationId] = useState<string | null>(null);
+  const [activeSide, setActiveSide] = useState<ImageId>(() => {
+    if (!initialFindingId || !product) return 'front';
+    const decl = product.declarations.find((d) => d.id === initialFindingId);
+    const targetSide = decl?.evidence?.image;
+    if (targetSide) return targetSide;
+    if (decl?.source && decl.source !== 'both') return decl.source;
+    return 'front';
+  });
 
-  const handleSelectDeclaration = useCallback((id: string | null) => {
-    setSelectedDeclarationId((prev) => (prev === id ? null : id));
-  }, []);
+  const handleSelectDeclaration = useCallback(
+    (id: string | null) => {
+      setSelectedDeclarationId((prev) => {
+        const next = prev === id ? null : id;
+
+        if (next && product) {
+          // Clicking a finding switches the Compliance Map to whichever
+          // image (front, back, or an additional view) its evidence
+          // actually lives on. If the declaration's source is "both" (or
+          // evidence is missing) we leave the currently active view as-is
+          // so the user can switch manually.
+          const decl = product.declarations.find((d) => d.id === next);
+          const targetSide = decl?.evidence?.image;
+
+          if (targetSide) {
+            setActiveSide(targetSide);
+          } else if (decl?.source && decl.source !== 'both') {
+            setActiveSide(decl.source);
+          }
+        }
+
+        return next;
+      });
+    },
+    [product]
+  );
 
   if (!product) {
     return (
@@ -41,9 +97,8 @@ export default function ComplianceMapContent() {
     );
   }
 
-  const selectedDeclaration = product.declarations.find(
-    (d) => d.id === selectedDeclarationId
-  ) || null;
+  const selectedDeclaration =
+    product.declarations.find((d) => d.id === selectedDeclarationId) || null;
 
   const selectedFinding = selectedDeclaration
     ? product.findings.find((f) => f.declarationId === selectedDeclaration.id) || null
@@ -54,6 +109,10 @@ export default function ComplianceMapContent() {
       {/* Toolbar */}
       <ComplianceMapToolbar product={product} />
 
+      {/* Phase 5C: top-level results hierarchy — score, status, counts,
+          most critical finding, recommended next action */}
+      <ResultsSummary product={product} onSelectCriticalFinding={handleSelectDeclaration} />
+
       {/* Main split layout */}
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 items-start">
         {/* LEFT: Product image with bounding boxes */}
@@ -62,8 +121,10 @@ export default function ComplianceMapContent() {
             product={product}
             selectedDeclarationId={selectedDeclarationId}
             hoveredDeclarationId={hoveredDeclarationId}
+            activeSide={activeSide}
             onSelectDeclaration={handleSelectDeclaration}
             onHoverDeclaration={setHoveredDeclarationId}
+            onSetActiveSide={setActiveSide}
           />
 
           {/* Readability table */}
@@ -73,10 +134,7 @@ export default function ComplianceMapContent() {
         {/* RIGHT: Findings panel + score + detail */}
         <div className="xl:col-span-2 space-y-4">
           {/* Quality score */}
-          <QualityScoreCard
-            score={product.qualityScore}
-            breakdown={product.scoreBreakdown}
-          />
+          <QualityScoreCard score={product.qualityScore} breakdown={product.scoreBreakdown} />
 
           {/* Findings list */}
           <FindingsPanel
@@ -92,7 +150,7 @@ export default function ComplianceMapContent() {
             <FindingDetailPanel
               declaration={selectedDeclaration}
               finding={selectedFinding}
-              productId={productId}
+              productId={product.id}
             />
           )}
         </div>

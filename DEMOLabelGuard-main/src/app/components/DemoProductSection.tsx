@@ -53,7 +53,8 @@ export default function DemoProductsSection() {
           <h2 className="text-lg font-bold text-navy">Demo Products</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Three deterministic demo inspections — each finding maps to evidence visible in the label image
+          Three deterministic demo inspections — each finding maps to evidence visible in the label
+          image
         </p>
       </div>
 
@@ -64,7 +65,7 @@ export default function DemoProductsSection() {
             <button
               key={`demo-${product.id}`}
               onClick={() => handleDemo(product.id)}
-              className={`w-full text-left p-4 rounded-xl border transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5 group ${meta.accentClass}`}
+              className={`focus-ring w-full text-left p-4 rounded-xl border transition-all duration-200 hover:shadow-card-hover hover:-translate-y-0.5 group ${meta.accentClass}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
