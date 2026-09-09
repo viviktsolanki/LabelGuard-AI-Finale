@@ -67,6 +67,13 @@ app.get("/", (c) => {
   });
 });
 
+app.get("/health", (c) => {
+  return c.json({
+    status: "healthy",
+    service: "labelguard-x402",
+  });
+});
+
 const port = Number(process.env.PORT || 4021);
 
 serve(
