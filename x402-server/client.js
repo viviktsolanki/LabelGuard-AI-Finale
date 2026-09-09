@@ -31,7 +31,9 @@ if (!avmMnemonic) {
 const ALGORAND_TESTNET =
   "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=";
 
-const url = "http://localhost:4021/api/analyze";
+const url =
+  process.env.X402_RESOURCE_URL ||
+  "http://localhost:4021/api/analyze";
 
 const PORT = 4022;
 
@@ -97,7 +99,10 @@ async function payForAnalysis() {
 }
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "http://localhost:4028");
+  res.setHeader(
+  "Access-Control-Allow-Origin",
+  process.env.FRONTEND_URL || "http://localhost:4028"
+);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Content-Type", "application/json");
