@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo, memo } from 'react';
+import React, { useState, useCallback, useMemo, memo, useEffect } from 'react';
 import Image from 'next/image';
 
 interface AppImageProps {
@@ -43,6 +43,14 @@ const AppImage = memo(function AppImage({
     const [imageSrc, setImageSrc] = useState(src);
     const [isLoading, setIsLoading] = useState(true);
     const [hasError, setHasError] = useState(false);
+
+    // Keep internal state in sync when the parent swaps in a new src for an
+    // already-mounted instance (e.g. re-selecting an upload preview).
+    useEffect(() => {
+        setImageSrc(src);
+        setIsLoading(true);
+        setHasError(false);
+    }, [src]);
 
     const isExternalUrl = useMemo(() => typeof imageSrc === 'string' && imageSrc.startsWith('http'), [imageSrc]);
     const resolvedUnoptimized = unoptimized || isExternalUrl;

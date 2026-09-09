@@ -2,6 +2,8 @@ import React from 'react';
 import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import { Toaster } from 'sonner';
+import StoryModeRoot from '@/components/story-mode/StoryModeRoot';
+import ScanCopilotRoot from '@/components/copilot/ScanCopilotRoot';
 import '../styles/tailwind.css';
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -25,9 +27,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={plusJakartaSans.variable} suppressHydrationWarning>
       <body className={plusJakartaSans.className}>
@@ -41,7 +41,9 @@ export default function RootLayout({
             },
           }}
         />
-</body>
+        <StoryModeRoot />
+        <ScanCopilotRoot />
+      </body>
     </html>
   );
 }

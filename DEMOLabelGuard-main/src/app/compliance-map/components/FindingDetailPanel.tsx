@@ -54,16 +54,22 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
         {cfg.icon}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-navy">
-              {declaration.field}
-            </h3>
+            <div className="min-w-0">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Field
+              </span>
+              <h3 className="text-sm font-bold text-navy truncate">{declaration.field}</h3>
+            </div>
             <span className={`status-badge ${cfg.badgeCls} flex-shrink-0`}>
               {declaration.status}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {finding ? finding.title : `${declaration.field} — ${declaration.status}`}
-          </p>
+          {finding && (
+            <p className="text-xs text-muted-foreground mt-1.5">
+              <span className="font-semibold text-navy">Issue: </span>
+              {finding.title}
+            </p>
+          )}
         </div>
       </div>
 
@@ -90,9 +96,15 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
               <Eye size={11} />
               <span className="text-xs font-medium">Confidence</span>
             </div>
-            <p className={`text-sm font-bold font-tabular ${
-              declaration.confidence >= 80 ? 'text-pass' : declaration.confidence >= 60 ? 'text-review' : 'text-flag'
-            }`}>
+            <p
+              className={`text-sm font-bold font-tabular ${
+                declaration.confidence >= 80
+                  ? 'text-pass'
+                  : declaration.confidence >= 60
+                    ? 'text-review'
+                    : 'text-flag'
+              }`}
+            >
               {declaration.confidence}%
             </p>
           </div>
@@ -101,9 +113,15 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
               <Eye size={11} />
               <span className="text-xs font-medium">Readability</span>
             </div>
-            <p className={`text-xs font-semibold ${
-              declaration.readabilityLabel === 'GOOD' ? 'text-pass' : declaration.readabilityLabel === 'ACCEPTABLE' ? 'text-review' : 'text-flag'
-            }`}>
+            <p
+              className={`text-xs font-semibold ${
+                declaration.readabilityLabel === 'GOOD'
+                  ? 'text-pass'
+                  : declaration.readabilityLabel === 'ACCEPTABLE'
+                    ? 'text-review'
+                    : 'text-flag'
+              }`}
+            >
               ~{declaration.readabilityPx}px · {declaration.readabilityLabel}
             </p>
           </div>
@@ -163,7 +181,7 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
         {/* Ask LabelGuard CTA */}
         <Link
           href={`/copilot?product=${productId}&finding=${finding?.id || declaration.id}`}
-          className="btn-secondary w-full text-sm justify-center"
+          className="focus-ring btn-secondary w-full text-sm justify-center"
         >
           <MessageSquare size={14} />
           Ask LabelGuard about this finding

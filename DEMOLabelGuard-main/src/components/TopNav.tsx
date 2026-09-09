@@ -53,9 +53,10 @@ export default function TopNav({ currentRoute }: TopNavProps) {
                 <Link
                   key={`nav-${item.href}`}
                   href={item.href}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                  className={`focus-ring flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isActive
-                      ? 'bg-accent/10 text-accent font-semibold' :'text-muted-foreground hover:text-foreground hover:bg-muted'
+                      ? 'bg-accent/10 text-accent font-semibold'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
                 >
                   {item.icon}
@@ -69,7 +70,7 @@ export default function TopNav({ currentRoute }: TopNavProps) {
           <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="hidden sm:flex btn-primary text-xs px-4 py-2 rounded-lg"
+              className="focus-ring hidden sm:flex btn-primary text-xs px-4 py-2 rounded-lg"
             >
               <ScanLine size={14} />
               New Scan
@@ -78,8 +79,9 @@ export default function TopNav({ currentRoute }: TopNavProps) {
             {/* Mobile menu toggle */}
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden btn-ghost p-2 rounded-lg"
+              className="focus-ring md:hidden btn-ghost p-2 rounded-lg"
               aria-label="Toggle menu"
+              aria-expanded={mobileOpen}
             >
               {mobileOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
@@ -98,7 +100,8 @@ export default function TopNav({ currentRoute }: TopNavProps) {
                   onClick={() => setMobileOpen(false)}
                   className={`flex items-center gap-2.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isActive
-                      ? 'bg-accent/10 text-accent font-semibold' :'text-muted-foreground hover:text-foreground hover:bg-muted'
+                      ? 'bg-accent/10 text-accent font-semibold'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
                 >
                   {item.icon}

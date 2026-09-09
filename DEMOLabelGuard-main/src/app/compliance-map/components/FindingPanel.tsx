@@ -1,14 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import {
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  ChevronDown,
-  ChevronUp,
-  Filter,
-} from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronUp, Filter } from 'lucide-react';
 import { type Declaration, type Finding, type DeclarationStatus } from '@/lib/mockData';
 
 interface Props {
@@ -33,6 +26,14 @@ const STATUS_BADGE_CLS = {
   FLAG: 'badge-flag',
 };
 
+// Phase 5C: scan-order priority — most important findings first. Display
+// order only; never mutates the underlying declarations/findings data.
+const STATUS_PRIORITY: Record<DeclarationStatus, number> = {
+  FLAG: 0,
+  REVIEW: 1,
+  PASS: 2,
+};
+
 export default function FindingsPanel({
   declarations,
   findings,
@@ -43,9 +44,10 @@ export default function FindingsPanel({
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('ALL');
   const [expanded, setExpanded] = useState(true);
 
-  const filtered = declarations.filter(
-    (d) => filterStatus === 'ALL' || d.status === filterStatus
-  );
+  const filtered = declarations
+    .filter((d) => filterStatus === 'ALL' || d.status === filterStatus)
+    .slice()
+    .sort((a, b) => STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status]);
 
   const passCount = declarations.filter((d) => d.status === 'PASS').length;
   const reviewCount = declarations.filter((d) => d.status === 'REVIEW').length;
@@ -65,14 +67,13 @@ export default function FindingsPanel({
         <div className="flex items-center gap-2">
           <Filter size={14} className="text-muted-foreground" />
           <span className="text-sm font-bold text-navy">Findings</span>
-          <span className="text-xs text-muted-foreground">
-            {declarations.length} declarations
-          </span>
+          <span className="text-xs text-muted-foreground">{declarations.length} declarations</span>
         </div>
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="btn-ghost p-1.5 rounded-lg"
+          className="focus-ring btn-ghost p-1.5 rounded-lg"
           aria-label="Toggle findings panel"
+          aria-expanded={expanded}
         >
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
@@ -86,15 +87,19 @@ export default function FindingsPanel({
               <button
                 key={`filter-${opt.key}`}
                 onClick={() => setFilterStatus(opt.key)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 ${
+                aria-pressed={filterStatus === opt.key}
+                className={`focus-ring flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 ${
                   filterStatus === opt.key
-                    ? 'bg-accent/10 text-accent border border-accent/20' :'bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent'
+                    ? 'bg-accent/10 text-accent border border-accent/20'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent'
                 }`}
               >
                 {opt.label}
                 <span
                   className={`px-1 rounded font-tabular ${
-                    filterStatus === opt.key ? 'bg-accent text-white' : 'bg-border text-muted-foreground'
+                    filterStatus === opt.key
+                      ? 'bg-accent text-white'
+                      : 'bg-border text-muted-foreground'
                   }`}
                 >
                   {opt.count}
@@ -127,7 +132,9 @@ export default function FindingsPanel({
                     onClick={() => onSelectDeclaration(decl.id)}
                     onMouseEnter={() => onHoverDeclaration(decl.id)}
                     onMouseLeave={() => onHoverDeclaration(null)}
-                    className={`w-full text-left px-4 py-3 transition-all duration-150 finding-row-hover ${
+                    aria-pressed={isSelected}
+                    aria-label={`${decl.field}, ${decl.status}, confidence ${decl.confidence}%`}
+                    className={`focus-ring w-full text-left px-4 py-3 transition-all duration-150 finding-row-hover ${
                       isSelected ? 'finding-selected' : ''
                     }`}
                   >
@@ -139,7 +146,9 @@ export default function FindingsPanel({
                           <span className="text-sm font-semibold text-navy truncate">
                             {decl.field}
                           </span>
-                          <span className={`status-badge ${STATUS_BADGE_CLS[decl.status]} flex-shrink-0 text-xs`}>
+                          <span
+                            className={`status-badge ${STATUS_BADGE_CLS[decl.status]} flex-shrink-0 text-xs`}
+                          >
                             {decl.status}
                           </span>
                         </div>
@@ -161,8 +170,8 @@ export default function FindingsPanel({
                                     decl.confidence >= 80
                                       ? 'var(--pass)'
                                       : decl.confidence >= 60
-                                      ? 'var(--review)'
-                                      : 'var(--flag)',
+                                        ? 'var(--review)'
+                                        : 'var(--flag)',
                                   transition: 'width 0.6s ease-out',
                                 }}
                               />
