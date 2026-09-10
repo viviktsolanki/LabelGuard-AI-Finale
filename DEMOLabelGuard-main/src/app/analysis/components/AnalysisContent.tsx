@@ -145,6 +145,16 @@ export default function AnalysisContent() {
   const [pendingUpload, setPendingUpload] =
     useState<PendingUpload | null>(null);
 
+  // Tracks which uploaded-preview images failed to decode/render in this
+  // browser, keyed by image id ('front' | 'back' | additional-N), so we
+  // can show an honest diagnostic message instead of the browser's own
+  // unexplained native broken-image placeholder.
+  const [imageLoadErrors, setImageLoadErrors] = useState<Record<string, boolean>>({});
+
+  const markImageLoadError = useCallback((imageId: string) => {
+    setImageLoadErrors((prev) => (prev[imageId] ? prev : { ...prev, [imageId]: true }));
+  }, []);
+
   const [stageStates, setStageStates] =
     useState<Record<string, StageState>>({});
 
@@ -559,7 +569,16 @@ export default function AnalysisContent() {
                 src={pendingUpload.frontImageDataUrl}
                 alt="Front of uploaded product"
                 className="absolute inset-0 w-full h-full object-contain"
+                onError={() => markImageLoadError('front')}
               />
+              {imageLoadErrors.front && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted p-3 text-center">
+                  <AlertCircle size={18} className="text-flag" />
+                  <p className="text-xs text-muted-foreground">
+                    This image couldn&apos;t be displayed on this device. Try retaking the photo.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -582,7 +601,16 @@ export default function AnalysisContent() {
                 src={pendingUpload.backImageDataUrl}
                 alt="Back of uploaded product"
                 className="absolute inset-0 w-full h-full object-contain"
+                onError={() => markImageLoadError('back')}
               />
+              {imageLoadErrors.back && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted p-3 text-center">
+                  <AlertCircle size={18} className="text-flag" />
+                  <p className="text-xs text-muted-foreground">
+                    This image couldn&apos;t be displayed on this device. Try retaking the photo.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -610,7 +638,16 @@ export default function AnalysisContent() {
                     src={img.dataUrl}
                     alt={`${imageLabelFor(img.id)} of uploaded product`}
                     className="absolute inset-0 w-full h-full object-contain"
+                    onError={() => markImageLoadError(img.id)}
                   />
+                  {imageLoadErrors[img.id] && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted p-2 text-center">
+                      <AlertCircle size={14} className="text-flag" />
+                      <p className="text-[10px] text-muted-foreground">
+                        Couldn&apos;t display on this device.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

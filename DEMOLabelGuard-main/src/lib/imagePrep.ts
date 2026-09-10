@@ -21,6 +21,26 @@
  * same, single data URL is what gets sent to the /api/analyze vision
  * model AND what gets persisted, so there is no separate "quality for AI"
  * vs "quality for storage" divergence to keep in sync.
+ *
+ * MOBILE FIX (this revision): the original implementation read the FULL,
+ * un-resized file into a base64 data URL via FileReader *before* decoding
+ * it into an <img> for resizing — meaning a multi-megabyte base64 string
+ * was always materialized first, even though only the final, much-smaller
+ * resized data URL is ever used. On mobile Chrome/Safari/Samsung Internet
+ * this large intermediate string, combined with decoding a large image
+ * from a data: URL (as opposed to an object URL), was unreliable enough to
+ * produce corrupt/incomplete image data on some devices, surfacing later
+ * as the browser's own unexplained "Failed to load" for the affected
+ * preview/analysis image. The fix: decode straight from the File/Blob via
+ * `URL.createObjectURL()` + `<img>` + canvas (the same object-URL approach
+ * already used elsewhere in this app for instant previews), resize FIRST,
+ * and only ever produce a data URL from the small, resized canvas. The
+ * object URL is always revoked once decoding finishes (success or
+ * failure). A decode timeout guards against a stalled/never-firing
+ * load on mobile. The output contract — a single Promise<string> resolving
+ * to a `data:image/...;base64,...` URL — is unchanged, so callers
+ * (UploadZoneSection.tsx, sessionStorage persistence, /api/analyze via
+ * parseImageDataUrl) require no changes.
  */
 
 /** Long-edge cap in pixels. 2000px is well above what's needed to read
@@ -33,74 +53,132 @@ const MAX_DIMENSION_PX = 2000;
  * compressing meaningfully compared to a camera's default JPEG output. */
 const JPEG_QUALITY = 0.85;
 
+/** Max time to wait for the object-URL image to decode before giving up
+ * and falling back to a direct file read. Guards against a stalled/never-
+ * firing `onload`/`onerror` on mobile, which would otherwise hang the
+ * upload indefinitely. */
+const DECODE_TIMEOUT_MS = 8000;
+
+/**
+ * Reads a File directly into a raw (un-resized) base64 data URL. Used ONLY
+ * as a fallback/passthrough — never as the primary decode path — so a
+ * large intermediate base64 string is created at most once, and only when
+ * genuinely needed (decode failure, or the image is already small enough
+ * that resizing would just re-encode it for no benefit).
+ */
+function fileToRawDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Unable to read image'));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
  * Reads a File and returns an optimized JPEG data URL: downscaled to fit
  * within MAX_DIMENSION_PX on its longest edge (never upscaled) and
- * re-encoded at JPEG_QUALITY. Falls back to the original file's raw data
- * URL if image decoding/canvas encoding fails for any reason (e.g. an
- * unusual format the browser's <img>/<canvas> pipeline can't round-trip) —
+ * re-encoded at JPEG_QUALITY. Decodes directly from the file via an object
+ * URL (mobile-reliable) rather than a base64 data URL, and resizes BEFORE
+ * any data URL is produced. Falls back to the original file's raw data URL
+ * if image decoding/canvas encoding fails or times out for any reason —
  * never blocks the upload just because compression didn't work.
  */
 export const fileToOptimizedDataUrl = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+  return new Promise((resolve) => {
+    let objectUrl: string;
+    try {
+      objectUrl = URL.createObjectURL(file);
+    } catch {
+      // Couldn't even create an object URL — fall back to a direct read.
+      fileToRawDataUrl(file)
+        .then(resolve)
+        .catch(() => resolve(''));
+      return;
+    }
 
-    reader.onerror = () => reject(new Error('Unable to read image'));
+    let settled = false;
 
-    reader.onload = () => {
-      const rawDataUrl = String(reader.result);
-
-      const img = new Image();
-
-      img.onerror = () => {
-        // Couldn't decode for resizing — fall back to the untouched
-        // original rather than failing the whole upload.
-        resolve(rawDataUrl);
-      };
-
-      img.onload = () => {
-        try {
-          const { naturalWidth: w, naturalHeight: h } = img;
-
-          if (!w || !h) {
-            resolve(rawDataUrl);
-            return;
-          }
-
-          const scale = Math.min(1, MAX_DIMENSION_PX / Math.max(w, h));
-          const targetW = Math.max(1, Math.round(w * scale));
-          const targetH = Math.max(1, Math.round(h * scale));
-
-          // Already small enough and already a JPEG — no point
-          // re-encoding and potentially generationally degrading it.
-          if (scale === 1 && file.type === 'image/jpeg') {
-            resolve(rawDataUrl);
-            return;
-          }
-
-          const canvas = document.createElement('canvas');
-          canvas.width = targetW;
-          canvas.height = targetH;
-
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(rawDataUrl);
-            return;
-          }
-
-          ctx.drawImage(img, 0, 0, targetW, targetH);
-
-          const optimized = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-          resolve(optimized || rawDataUrl);
-        } catch {
-          resolve(rawDataUrl);
-        }
-      };
-
-      img.src = rawDataUrl;
+    const cleanupAndResolve = (value: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      URL.revokeObjectURL(objectUrl);
+      resolve(value);
     };
 
-    reader.readAsDataURL(file);
+    // Fallback / passthrough: read the original file directly. Used both
+    // for genuine decode failures and for the "already small enough,
+    // already a JPEG" passthrough case below, so the original bytes are
+    // preserved untouched rather than generationally re-encoded.
+    const fallbackToRawFile = () => {
+      if (settled) return;
+      clearTimeout(timeoutId);
+      fileToRawDataUrl(file)
+        .then(cleanupAndResolve)
+        .catch(() => cleanupAndResolve(''));
+    };
+
+    const timeoutId = setTimeout(() => {
+      fallbackToRawFile();
+    }, DECODE_TIMEOUT_MS);
+
+    const img = new Image();
+
+    img.onerror = () => {
+      // Couldn't decode for resizing — fall back to the untouched
+      // original rather than failing the whole upload.
+      fallbackToRawFile();
+    };
+
+    img.onload = () => {
+      try {
+        const { naturalWidth: w, naturalHeight: h } = img;
+
+        if (!w || !h) {
+          fallbackToRawFile();
+          return;
+        }
+
+        const scale = Math.min(1, MAX_DIMENSION_PX / Math.max(w, h));
+
+        // Already small enough and already a JPEG — no point re-encoding
+        // and potentially generationally degrading it. Read the original
+        // bytes directly rather than round-tripping through canvas.
+        if (scale === 1 && file.type === 'image/jpeg') {
+          fallbackToRawFile();
+          return;
+        }
+
+        const targetW = Math.max(1, Math.round(w * scale));
+        const targetH = Math.max(1, Math.round(h * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          fallbackToRawFile();
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+
+        const optimized = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+
+        if (!optimized) {
+          fallbackToRawFile();
+          return;
+        }
+
+        cleanupAndResolve(optimized);
+      } catch {
+        fallbackToRawFile();
+      }
+    };
+
+    img.src = objectUrl;
   });
 };
 
