@@ -65,18 +65,18 @@ const DEMO_HISTORY_ITEMS: HistoryItem[] = [
 function StatusBadge({ count, type }: { count: number; type: 'pass' | 'review' | 'flag' }) {
   if (type === 'pass')
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pass/10 text-pass text-xs font-semibold">
+      <span className="status-badge badge-pass">
         <CheckCircle2 size={10} /> {count} PASS
       </span>
     );
   if (type === 'review')
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-review/10 text-review text-xs font-semibold">
+      <span className="status-badge badge-review">
         <AlertCircle size={10} /> {count} REVIEW
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-flag/10 text-flag text-xs font-semibold">
+    <span className="status-badge badge-flag">
       <XCircle size={10} /> {count} FLAG
     </span>
   );
@@ -215,17 +215,17 @@ export default function HistoryContent() {
                   )}
                   {/* Overall status badge */}
                   {overallStatus === 'FLAG' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-flag/10 text-flag text-xs font-semibold">
+                    <span className="status-badge badge-flag">
                       <XCircle size={9} /> FLAG
                     </span>
                   )}
                   {overallStatus === 'REVIEW' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-review/10 text-review text-xs font-semibold">
+                    <span className="status-badge badge-review">
                       <AlertCircle size={9} /> REVIEW
                     </span>
                   )}
                   {overallStatus === 'PASS' && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pass/10 text-pass text-xs font-semibold">
+                    <span className="status-badge badge-pass">
                       <CheckCircle2 size={9} /> PASS
                     </span>
                   )}

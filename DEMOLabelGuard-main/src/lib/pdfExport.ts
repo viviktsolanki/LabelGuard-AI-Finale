@@ -527,14 +527,38 @@ export function buildStructuredReportPdf(blocks: ReportBlock[]): Blob {
   return new Blob([bytes], { type: 'application/pdf' });
 }
 
-/** Triggers a browser download of the given PDF Blob. */
-export function downloadPdfBlob(blob: Blob, filename: string): void {
+/**
+ * Triggers a browser download of an arbitrary Blob via a temporary
+ * `<a download>` link. Shared by both the PDF and TXT report exports (see
+ * `downloadPdfBlob` below and `exportText` in ReportContent.tsx) so there
+ * is exactly one place that implements this mechanism.
+ *
+ * MOBILE FIX: `URL.revokeObjectURL` used to run synchronously right after
+ * `a.click()`, and the anchor wasn't always attached to the DOM first. On
+ * some mobile browsers (notably iOS Safari and Android WebViews) the
+ * actual download handoff for a blob: URL happens asynchronously after
+ * `click()` returns, and an unattached anchor's `click()` isn't guaranteed
+ * to trigger a download at all — so revoking the URL (and removing the
+ * anchor) in the same tick can race that handoff and silently produce an
+ * empty/failed download. Attaching the anchor to the document and
+ * deferring the revoke/removal to the next tick gives the browser time to
+ * start reading the blob first, while still cleaning up promptly. */
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+/** Triggers a browser download of the given PDF Blob. See `downloadBlob`
+ * above for why this defers cleanup instead of revoking synchronously. */
+export function downloadPdfBlob(blob: Blob, filename: string): void {
+  downloadBlob(blob, filename);
 }

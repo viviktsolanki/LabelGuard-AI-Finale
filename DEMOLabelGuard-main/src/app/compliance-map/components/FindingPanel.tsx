@@ -125,6 +125,11 @@ export default function FindingsPanel({
               filtered.map((decl) => {
                 const finding = findings.find((f) => f.declarationId === decl.id);
                 const isSelected = selectedDeclarationId === decl.id;
+                const isCritical = decl.status === 'FLAG';
+                // Lead with the actual issue (what's wrong) for FLAG/REVIEW rows
+                // so the problem is scannable without opening the detail panel;
+                // PASS rows have no issue, so the field name stays primary.
+                const headline = finding && decl.status !== 'PASS' ? finding.title : decl.field;
 
                 return (
                   <button
@@ -135,7 +140,11 @@ export default function FindingsPanel({
                     aria-pressed={isSelected}
                     aria-label={`${decl.field}, ${decl.status}, confidence ${decl.confidence}%`}
                     className={`focus-ring w-full text-left px-4 py-3 transition-all duration-150 finding-row-hover ${
-                      isSelected ? 'finding-selected' : ''
+                      isSelected
+                        ? 'finding-selected'
+                        : isCritical
+                          ? 'border-l-2 border-l-flag bg-flag/5'
+                          : ''
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -143,8 +152,8 @@ export default function FindingsPanel({
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold text-navy truncate">
-                            {decl.field}
+                          <span className="text-sm font-semibold text-navy leading-snug">
+                            {headline}
                           </span>
                           <span
                             className={`status-badge ${STATUS_BADGE_CLS[decl.status]} flex-shrink-0 text-xs`}
@@ -153,10 +162,21 @@ export default function FindingsPanel({
                           </span>
                         </div>
 
-                        {/* Extracted text */}
-                        <p className="text-xs font-mono text-muted-foreground mt-0.5 truncate">
-                          {decl.extractedText || decl.value}
+                        {/* Field this issue belongs to, plus the extracted text as evidence */}
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {headline !== decl.field && (
+                            <span className="font-medium">{decl.field}: </span>
+                          )}
+                          <span className="font-mono">{decl.extractedText || decl.value}</span>
                         </p>
+
+                        {/* One-line recommended action, so the fix is visible without opening the finding */}
+                        {decl.status !== 'PASS' && decl.recommendedAction && (
+                          <p className="text-xs text-accent mt-1 leading-snug line-clamp-1">
+                            <span className="font-semibold">Do this: </span>
+                            {decl.recommendedAction}
+                          </p>
+                        )}
 
                         <div className="flex items-center gap-3 mt-1.5">
                           {/* Confidence bar */}

@@ -15,6 +15,7 @@ import {
   Info,
   ScanLine,
   Video,
+  Loader2,
 } from 'lucide-react';
 import {
   DEMO_PRODUCTS,
@@ -27,6 +28,7 @@ import {
 import { getAllRealProducts, isRealUploadId } from '@/lib/realProduct';
 import {
   buildStructuredReportPdf,
+  downloadBlob,
   downloadPdfBlob,
   PDF_COLORS,
   type ReportBlock,
@@ -83,18 +85,18 @@ function describeEvidenceSource(
 function StatusBadge({ status }: { status: 'PASS' | 'REVIEW' | 'FLAG' }) {
   if (status === 'PASS')
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pass/10 text-pass text-xs font-semibold">
+      <span className="status-badge badge-pass">
         <CheckCircle2 size={10} /> PASS
       </span>
     );
   if (status === 'REVIEW')
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-review/10 text-review text-xs font-semibold">
+      <span className="status-badge badge-review">
         <AlertCircle size={10} /> REVIEW
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-flag/10 text-flag text-xs font-semibold">
+    <span className="status-badge badge-flag">
       <XCircle size={10} /> FLAG
     </span>
   );
@@ -494,12 +496,10 @@ function exportText(product: ProductAnalysis): boolean {
   try {
     const text = generateReportText(product);
     const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `labelguard-report-${product.id}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // Shared download helper (see pdfExport.ts) — attaches the anchor to
+    // the DOM and defers URL.revokeObjectURL so the download reliably
+    // fires on mobile browsers instead of racing the cleanup.
+    downloadBlob(blob, `labelguard-report-${product.id}.txt`);
     return true;
   } catch (error) {
     console.error('LabelGuard TXT export failed:', error);
@@ -589,8 +589,9 @@ export default function ReportContent() {
     }
 
     return (
-      <div className="max-w-lg mx-auto py-20 text-center space-y-3 text-sm text-muted-foreground">
-        Loading report…
+      <div className="max-w-lg mx-auto py-20 text-center space-y-3">
+        <Loader2 size={28} className="text-accent mx-auto animate-spin" />
+        <p className="text-sm text-muted-foreground">Loading report…</p>
       </div>
     );
   }
@@ -688,13 +689,19 @@ export default function ReportContent() {
             <div key={item.label} className="text-center space-y-1.5">
               <div className="relative w-12 h-12 mx-auto">
                 <svg viewBox="0 0 44 44" className="w-12 h-12 -rotate-90">
-                  <circle cx="22" cy="22" r="18" fill="none" stroke="#e5e7eb" strokeWidth="4" />
+                  <circle cx="22" cy="22" r="18" fill="none" stroke="var(--muted)" strokeWidth="4" />
                   <circle
                     cx="22"
                     cy="22"
                     r="18"
                     fill="none"
-                    stroke={item.value >= 85 ? '#22c55e' : item.value >= 70 ? '#f59e0b' : '#ef4444'}
+                    stroke={
+                      item.value >= 85
+                        ? 'var(--pass)'
+                        : item.value >= 70
+                          ? 'var(--review)'
+                          : 'var(--flag)'
+                    }
                     strokeWidth="4"
                     strokeDasharray={`${(item.value / 100) * 113} 113`}
                     strokeLinecap="round"
@@ -888,13 +895,40 @@ export default function ReportContent() {
                     )}
                   </div>
 
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {finding.explanation}
-                  </p>
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                      Why it matters
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {finding.explanation}
+                    </p>
+                  </div>
 
-                  <div className="flex items-start gap-1.5 p-2.5 rounded-lg bg-accent/5 border border-accent/20">
-                    <Info size={12} className="text-accent mt-0.5 flex-shrink-0" />
-                    <p className="text-xs text-accent leading-relaxed">{finding.recommendation}</p>
+                  <div
+                    className={`flex items-start gap-1.5 p-2.5 rounded-lg border ${
+                      finding.severity === 'FLAG'
+                        ? 'bg-flag-bg border-flag-border'
+                        : finding.severity === 'REVIEW'
+                          ? 'bg-review-bg border-review-border'
+                          : 'bg-accent/5 border-accent/20'
+                    }`}
+                  >
+                    <Info
+                      size={12}
+                      className={`mt-0.5 flex-shrink-0 ${finding.severity === 'FLAG' ? 'text-flag' : finding.severity === 'REVIEW' ? 'text-review' : 'text-accent'}`}
+                    />
+                    <p>
+                      <span
+                        className={`text-xs font-bold uppercase tracking-wide mr-1 ${finding.severity === 'FLAG' ? 'text-flag' : finding.severity === 'REVIEW' ? 'text-review' : 'text-accent'}`}
+                      >
+                        What to do:
+                      </span>
+                      <span
+                        className={`text-xs leading-relaxed ${finding.severity === 'FLAG' ? 'text-flag' : finding.severity === 'REVIEW' ? 'text-review' : 'text-accent'}`}
+                      >
+                        {finding.recommendation}
+                      </span>
+                    </p>
                   </div>
                 </div>
               );
@@ -903,20 +937,27 @@ export default function ReportContent() {
         </div>
       )}
 
-      {/* Recommended actions */}
+      {/* Recommended actions — quick-scan checklist tying each fix back to its issue */}
       {product.findings.length > 0 && (
         <div className="card p-5 space-y-3">
           <h2 className="text-sm font-bold text-navy">Recommended Actions</h2>
-          <ul className="space-y-2">
+          <p className="text-xs text-muted-foreground -mt-1">
+            Most critical first — see &quot;Findings &amp; Evidence&quot; above for full context on
+            each.
+          </p>
+          <ul className="space-y-2.5">
             {sortFindingsBySeverity(product.findings).map((f: Finding) => (
               <li
                 key={`action-${f.id}`}
-                className="flex items-start gap-2 text-sm text-muted-foreground"
+                className={`flex items-start gap-2 text-sm p-2.5 rounded-lg bg-muted/30 border-l-4 ${f.severity === 'FLAG' ? 'border-l-flag' : 'border-l-review'}`}
               >
                 <span
-                  className={`mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${f.severity === 'FLAG' ? 'bg-flag' : 'bg-review'}`}
+                  className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${f.severity === 'FLAG' ? 'bg-flag' : 'bg-review'}`}
                 />
-                {f.recommendation}
+                <p className="leading-relaxed">
+                  <span className="font-semibold text-navy">{f.title}</span>
+                  <span className="text-muted-foreground"> — {f.recommendation}</span>
+                </p>
               </li>
             ))}
           </ul>

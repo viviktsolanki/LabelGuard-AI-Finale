@@ -19,6 +19,8 @@ import {
   Lock,
   Wallet,
   Video,
+  ExternalLink,
+  Hash,
 } from 'lucide-react';
 import {
   getProductById,
@@ -37,6 +39,17 @@ interface PipelineStage {
   description: string;
   icon: React.ReactNode;
   durationMs: number;
+}
+
+// Shape of the settlement data the x402 payment bridge (x402-server/client.js)
+// returns from a real payment — mirrors the SettleResponse type from
+// @x402/core (transaction/network are always present; payer/amount are
+// optional depending on what the facilitator returns). Only fields actually
+// used for the receipt below are declared here.
+interface PaymentReceipt {
+  transaction: string;
+  network: string;
+  payer?: string;
 }
 
 const PIPELINE_STAGES: PipelineStage[] = [
@@ -101,6 +114,52 @@ const PIPELINE_STAGES: PipelineStage[] = [
 // production URL that doesn't exist yet.
 const X402_PAYMENT_URL =
   process.env.NEXT_PUBLIC_X402_PAYMENT_URL || 'http://localhost:4022';
+
+// Compact receipt shown right after a real x402 payment settles. Every
+// value here comes from `paymentReceipt` (captured verbatim from the
+// payment bridge's response) except the fixed access-fee amount and
+// network label, which mirror the price/network already configured and
+// displayed in the paywall above (x402-server/server.js: 100000 units of
+// USDC-testnet, 6 decimals = 0.10 USDC, on Algorand Testnet). No
+// transaction data is invented — if the bridge didn't return a
+// transaction id, this renders nothing.
+function PaymentReceiptCard({ receipt }: { receipt: PaymentReceipt | null }) {
+  if (!receipt) return null;
+
+  const explorerUrl = `https://lora.algokit.io/testnet/transaction/${receipt.transaction}`;
+  const shortTx =
+    receipt.transaction.length > 16
+      ? `${receipt.transaction.slice(0, 8)}…${receipt.transaction.slice(-6)}`
+      : receipt.transaction;
+
+  return (
+    <div className="rounded-lg border border-pass-border bg-pass-bg divide-y divide-pass-border text-xs">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-muted-foreground font-medium">Amount</span>
+        <span className="font-bold text-navy">0.10 USDC</span>
+      </div>
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-muted-foreground font-medium">Network</span>
+        <span className="font-semibold text-navy">Algorand Testnet</span>
+      </div>
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-muted-foreground font-medium flex items-center gap-1">
+          <Hash size={11} />
+          Transaction
+        </span>
+        <a
+          href={explorerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono font-semibold text-accent hover:underline flex items-center gap-1"
+        >
+          {shortTx}
+          <ExternalLink size={10} />
+        </a>
+      </div>
+    </div>
+  );
+}
 
 type StageState = 'pending' | 'running' | 'complete';
 
@@ -174,6 +233,10 @@ export default function AnalysisContent() {
   // x402 payment UI state
   const [paymentUnlocked, setPaymentUnlocked] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  // Real settlement data returned by the x402 payment bridge for this
+  // payment — populated only from the bridge's actual response, never
+  // fabricated. Used to render a compact receipt once payment succeeds.
+  const [paymentReceipt, setPaymentReceipt] = useState<PaymentReceipt | null>(null);
 
   useEffect(() => {
     if (mode !== 'upload') return;
@@ -442,6 +505,19 @@ export default function AnalysisContent() {
         throw new Error(
           data.error || 'x402 payment failed'
         );
+      }
+
+      // Capture the real settlement data the bridge returned (transaction
+      // id, network, payer) so it can be shown as a receipt — nothing here
+      // is generated client-side, only what the x402 facilitator actually
+      // settled. `data.payment.transaction` is the one field the x402
+      // SettleResponse type always includes, so gate the receipt on it.
+      if (data.payment && typeof data.payment.transaction === 'string') {
+        setPaymentReceipt({
+          transaction: data.payment.transaction,
+          network: data.payment.network,
+          payer: data.payment.payer,
+        });
       }
 
       setPaymentUnlocked(true);
@@ -737,12 +813,15 @@ export default function AnalysisContent() {
         {/* Progress */}
         {paymentUnlocked && (
         <div className="card p-5 space-y-5">
-          <div className="p-3 rounded-xl bg-pass-bg border border-pass-border flex items-center gap-3">
-            <CheckCircle2 size={16} className="text-pass flex-shrink-0" />
+          <div className="space-y-2">
+            <div className="p-3 rounded-xl bg-pass-bg border border-pass-border flex items-center gap-3">
+              <CheckCircle2 size={16} className="text-pass flex-shrink-0" />
 
-            <p className="text-xs font-semibold text-pass">
-              x402 payment verified — paid analysis access unlocked.
-            </p>
+              <p className="text-xs font-semibold text-pass">
+                x402 payment verified — paid analysis access unlocked.
+              </p>
+            </div>
+            <PaymentReceiptCard receipt={paymentReceipt} />
           </div>
 
           <div>
@@ -1331,6 +1410,8 @@ export default function AnalysisContent() {
                         </p>
                       </div>
                     </div>
+
+                    <PaymentReceiptCard receipt={paymentReceipt} />
 
                     <button
                       onClick={handleViewResults}

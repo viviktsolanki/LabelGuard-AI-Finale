@@ -5,6 +5,18 @@ import { XCircle, AlertCircle, CheckCircle2, ListChecks } from 'lucide-react';
 import type { ProductAnalysis } from '@/lib/mockData';
 import { buildPriorityActionPlan, type PriorityAction } from '@/lib/complianceInsights';
 
+const BORDER_CLASS: Record<PriorityAction['status'], string> = {
+  FLAG: 'border-l-4 border-l-flag',
+  REVIEW: 'border-l-4 border-l-review',
+  PASS: 'border-l-4 border-l-pass',
+};
+
+const ACTION_LABEL_CLASS: Record<PriorityAction['status'], string> = {
+  FLAG: 'text-flag',
+  REVIEW: 'text-review',
+  PASS: 'text-pass',
+};
+
 function ActionGroup({
   title,
   icon,
@@ -25,8 +37,12 @@ function ActionGroup({
       </div>
       <ul className="space-y-2">
         {actions.map((action) => (
-          <li key={action.id} className="p-3 rounded-lg bg-muted/30 border border-border">
-            <p className="text-sm font-semibold text-navy">
+          <li
+            key={action.id}
+            className={`p-3 rounded-lg bg-muted/30 border border-border ${BORDER_CLASS[action.status]}`}
+          >
+            {/* What's wrong */}
+            <p className="text-sm font-semibold text-navy leading-snug">
               {action.issue}
               {action.declarationField ? (
                 <span className="font-normal text-muted-foreground">
@@ -35,8 +51,19 @@ function ActionGroup({
                 </span>
               ) : null}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">Status: {action.status}</p>
-            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+
+            {/* Why it matters */}
+            {action.explanation && (
+              <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                {action.explanation}
+              </p>
+            )}
+
+            {/* What to do next */}
+            <p
+              className={`text-xs font-medium mt-1.5 leading-relaxed ${ACTION_LABEL_CLASS[action.status]}`}
+            >
+              <span className="font-bold uppercase tracking-wide text-[10px] mr-1">Do this:</span>
               {action.recommendation}
             </p>
           </li>

@@ -42,6 +42,16 @@ export default function ResultsSummary({ product, onSelectCriticalFinding }: Pro
     ? product.declarations.find((d) => d.id === insights.mostCriticalIssue!.declarationId) || null
     : null;
 
+  // Tie the "most critical finding" card's color to its actual severity so
+  // the highest-impact issue is visually distinguishable at a glance, not
+  // just textually labeled.
+  const criticalCardCls =
+    insights.mostCriticalIssue?.severity === 'FLAG'
+      ? 'bg-flag-bg border-flag-border hover:bg-flag-bg/80'
+      : insights.mostCriticalIssue?.severity === 'REVIEW'
+        ? 'bg-review-bg border-review-border hover:bg-review-bg/80'
+        : 'bg-muted/50 border-transparent hover:bg-muted';
+
   return (
     <section aria-label="Compliance results summary" className="card p-4 sm:p-5 space-y-4">
       {/* Score + overall status + counts */}
@@ -90,7 +100,7 @@ export default function ResultsSummary({ product, onSelectCriticalFinding }: Pro
             type="button"
             onClick={() => criticalDeclaration && onSelectCriticalFinding(criticalDeclaration.id)}
             disabled={!criticalDeclaration}
-            className="focus-ring text-left p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors duration-150 disabled:cursor-default disabled:hover:bg-muted/50"
+            className={`focus-ring text-left p-3 rounded-xl border transition-colors duration-150 disabled:cursor-default ${criticalCardCls}`}
             aria-label={
               criticalDeclaration
                 ? `View most critical finding on the compliance map: ${insights.mostCriticalIssue?.title}`
@@ -99,6 +109,16 @@ export default function ResultsSummary({ product, onSelectCriticalFinding }: Pro
           >
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
               Most Critical Finding
+              {insights.mostCriticalIssue && (
+                <span
+                  className={
+                    insights.mostCriticalIssue.severity === 'FLAG' ? 'text-flag' : 'text-review'
+                  }
+                >
+                  {' '}
+                  ({insights.mostCriticalIssue.severity})
+                </span>
+              )}
             </p>
             <p className="text-sm font-semibold text-navy leading-relaxed">
               {insights.mostCriticalIssue?.title}

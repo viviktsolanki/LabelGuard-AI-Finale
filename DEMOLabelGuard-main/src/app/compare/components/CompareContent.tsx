@@ -3,25 +3,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { GitCompare, ChevronDown, CheckCircle2, AlertCircle, XCircle, ArrowRight, ScanLine } from 'lucide-react';
+import { GitCompare, ChevronDown, CheckCircle2, AlertCircle, XCircle, ArrowRight, ScanLine, Loader2 } from 'lucide-react';
 import { DEMO_PRODUCTS, type ProductAnalysis } from '@/lib/mockData';
 import { getAllRealProducts, isRealUploadId } from '@/lib/realProduct';
 
 function StatusBadge({ status }: { status: 'PASS' | 'REVIEW' | 'FLAG' }) {
   if (status === 'PASS')
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pass/10 text-pass text-xs font-semibold">
+      <span className="status-badge badge-pass">
         <CheckCircle2 size={10} /> PASS
       </span>
     );
   if (status === 'REVIEW')
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-review/10 text-review text-xs font-semibold">
+      <span className="status-badge badge-review">
         <AlertCircle size={10} /> REVIEW
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-flag/10 text-flag text-xs font-semibold">
+    <span className="status-badge badge-flag">
       <XCircle size={10} /> FLAG
     </span>
   );
@@ -31,10 +31,10 @@ function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const r = (size - 8) / 2;
   const circ = 2 * Math.PI * r;
   const fill = (score / 100) * circ;
-  const color = score >= 85 ? '#22c55e' : score >= 70 ? '#f59e0b' : '#ef4444';
+  const color = score >= 85 ? 'var(--pass)' : score >= 70 ? 'var(--review)' : 'var(--flag)';
   return (
     <svg width={size} height={size} className="rotate-[-90deg]">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e5e7eb" strokeWidth={6} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={6} />
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -199,7 +199,10 @@ export default function CompareContent() {
             </p>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">Loading comparison…</p>
+          <>
+            <Loader2 size={28} className="text-accent mx-auto animate-spin" />
+            <p className="text-sm text-muted-foreground">Loading comparison…</p>
+          </>
         )}
       </div>
     );

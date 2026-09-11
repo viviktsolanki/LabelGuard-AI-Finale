@@ -25,6 +25,10 @@ export interface PriorityAction {
   recommendation: string;
   /** Declaration field this action relates to, if it could be resolved. */
   declarationField?: string;
+  /** Why this was flagged/reviewed — sourced from the finding's existing
+   * `explanation` field, so the plan can show "why it matters" alongside
+   * the recommendation without any new analysis or fabricated text. */
+  explanation?: string;
 }
 
 export interface PriorityActionPlan {
@@ -129,6 +133,7 @@ function toPriorityAction(product: ProductAnalysis, finding: Finding): PriorityA
     status: finding.severity,
     recommendation: finding.recommendation,
     declarationField: declaration?.field,
+    explanation: finding.explanation,
   };
 }
 

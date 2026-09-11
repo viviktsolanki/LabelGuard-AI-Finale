@@ -46,6 +46,15 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
   };
 
   const cfg = statusConfig[declaration.status];
+  const isActionable = declaration.status !== 'PASS';
+  // The action box carries the same severity color as the finding itself,
+  // so the fix is visually tied to how urgent the issue is.
+  const actionBoxCls =
+    declaration.status === 'FLAG'
+      ? 'bg-flag-bg border-flag-border text-flag'
+      : declaration.status === 'REVIEW'
+        ? 'bg-review-bg border-review-border text-review'
+        : 'bg-accent/5 border-accent/20 text-accent';
 
   return (
     <div className="card overflow-hidden animate-slide-in-right">
@@ -73,15 +82,22 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
         </div>
       </div>
 
-      <div className="p-4 space-y-3">
-        {/* Evidence chain: FINDING → EVIDENCE → EXTRACTED TEXT → CHECK → EXPLANATION → ACTION */}
+      <div className="p-4 space-y-4">
+        {/* Answer the three questions that matter, in order: what's wrong
+            (the detected text behind the issue named above), why it
+            matters (the existing explanation field), and what to do (the
+            existing recommended action). Supporting evidence (confidence,
+            readability, region, rule id) follows underneath as reference
+            detail rather than competing with the answer. Content is
+            unchanged from the underlying analysis — only the labeling and
+            visual order changed. */}
 
-        {/* Detected / Extracted text */}
+        {/* 1. What's wrong — the detected text that triggered the issue named above */}
         <div>
           <div className="flex items-center gap-1.5 mb-1.5">
             <FileText size={12} className="text-muted-foreground" />
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Detected Text
+              What&apos;s Wrong — Detected Text
             </span>
           </div>
           <div className="p-2.5 rounded-xl bg-navy/5 border border-border font-mono text-xs text-navy leading-relaxed">
@@ -89,88 +105,105 @@ export default function FindingDetailPanel({ declaration, finding, productId }: 
           </div>
         </div>
 
-        {/* Key details grid */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2.5 rounded-xl bg-muted/50">
-            <div className="flex items-center gap-1 text-muted-foreground mb-1">
-              <Eye size={11} />
-              <span className="text-xs font-medium">Confidence</span>
+        {/* 2. Why it matters — only shown when there's actually a concern */}
+        {isActionable && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Target size={12} className="text-review" />
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Why It Matters
+              </span>
             </div>
-            <p
-              className={`text-sm font-bold font-tabular ${
-                declaration.confidence >= 80
-                  ? 'text-pass'
-                  : declaration.confidence >= 60
-                    ? 'text-review'
-                    : 'text-flag'
-              }`}
-            >
-              {declaration.confidence}%
+            <p className={`text-sm leading-relaxed rounded-xl p-3 border ${cfg.bgCls}`}>
+              {declaration.explanation}
             </p>
           </div>
-          <div className="p-2.5 rounded-xl bg-muted/50">
-            <div className="flex items-center gap-1 text-muted-foreground mb-1">
-              <Eye size={11} />
-              <span className="text-xs font-medium">Readability</span>
-            </div>
-            <p
-              className={`text-xs font-semibold ${
-                declaration.readabilityLabel === 'GOOD'
-                  ? 'text-pass'
-                  : declaration.readabilityLabel === 'ACCEPTABLE'
-                    ? 'text-review'
-                    : 'text-flag'
-              }`}
-            >
-              ~{declaration.readabilityPx}px · {declaration.readabilityLabel}
-            </p>
-          </div>
-          <div className="p-2.5 rounded-xl bg-muted/50 col-span-2">
-            <div className="flex items-center gap-1 text-muted-foreground mb-1">
-              <MapPin size={11} />
-              <span className="text-xs font-medium">Evidence Region</span>
-            </div>
-            <p className="text-xs font-semibold text-navy">{declaration.sourceRegion}</p>
-          </div>
-        </div>
+        )}
 
-        {/* Rule check */}
+        {/* 3. What to do next — the recommended action, most prominent */}
         <div>
           <div className="flex items-center gap-1.5 mb-1.5">
-            <Cpu size={12} className="text-muted-foreground" />
+            <Lightbulb
+              size={12}
+              className={isActionable ? '' : 'text-accent'}
+              style={
+                isActionable
+                  ? { color: declaration.status === 'FLAG' ? 'var(--flag)' : 'var(--review)' }
+                  : undefined
+              }
+            />
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Compliance Check
+              {isActionable ? 'What To Do Next' : 'Status'}
             </span>
           </div>
-          <div className="p-2.5 rounded-xl bg-muted/50 font-mono text-xs text-navy">
-            {declaration.ruleCheck}
-          </div>
-        </div>
-
-        {/* Explanation */}
-        <div>
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <Target size={12} className="text-review" />
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Why {cfg.label}?
-            </span>
-          </div>
-          <p className={`text-xs leading-relaxed rounded-xl p-3 ${cfg.bgCls} border`}>
-            {declaration.explanation}
-          </p>
-        </div>
-
-        {/* Recommended action */}
-        <div>
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <Lightbulb size={12} className="text-accent" />
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Recommended Action
-            </span>
-          </div>
-          <p className="text-xs text-accent leading-relaxed bg-accent/5 border border-accent/20 rounded-xl p-3">
+          <p
+            className={`text-sm font-medium leading-relaxed rounded-xl p-3 border ${actionBoxCls}`}
+          >
             {declaration.recommendedAction}
           </p>
+        </div>
+
+        {/* Evidence detail — reference material, de-emphasized below the answer */}
+        <div className="pt-1 border-t border-border space-y-2">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <Cpu size={11} className="text-muted-foreground/70" />
+            <span className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider">
+              Evidence Detail
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-2.5 rounded-xl bg-muted/50">
+              <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                <Eye size={11} />
+                <span className="text-xs font-medium">Confidence</span>
+              </div>
+              <p
+                className={`text-sm font-bold font-tabular ${
+                  declaration.confidence >= 80
+                    ? 'text-pass'
+                    : declaration.confidence >= 60
+                      ? 'text-review'
+                      : 'text-flag'
+                }`}
+              >
+                {declaration.confidence}%
+              </p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-muted/50">
+              <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                <Eye size={11} />
+                <span className="text-xs font-medium">Readability</span>
+              </div>
+              <p
+                className={`text-xs font-semibold ${
+                  declaration.readabilityLabel === 'GOOD'
+                    ? 'text-pass'
+                    : declaration.readabilityLabel === 'ACCEPTABLE'
+                      ? 'text-review'
+                      : 'text-flag'
+                }`}
+              >
+                ~{declaration.readabilityPx}px · {declaration.readabilityLabel}
+              </p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-muted/50">
+              <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                <MapPin size={11} />
+                <span className="text-xs font-medium">Evidence Region</span>
+              </div>
+              <p className="text-xs font-semibold text-navy">{declaration.sourceRegion}</p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-muted/50">
+              <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                <Cpu size={11} />
+                <span className="text-xs font-medium">Compliance Check</span>
+              </div>
+              <p className="text-xs font-mono font-semibold text-navy truncate">
+                {declaration.ruleCheck}
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Disclaimer */}

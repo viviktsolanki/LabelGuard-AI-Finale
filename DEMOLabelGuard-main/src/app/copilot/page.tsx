@@ -178,8 +178,9 @@ export default function CopilotPage() {
     <Suspense
       fallback={
         <AppLayout currentRoute="/">
-          <div className="max-w-lg mx-auto py-20 text-center text-sm text-muted-foreground">
-            Loading LabelGuard…
+          <div className="max-w-3xl mx-auto flex flex-col h-[calc(100dvh-8rem)] min-h-[520px] items-center justify-center gap-3">
+            <Bot size={28} className="text-accent" />
+            <p className="text-sm text-muted-foreground">Loading Ask LabelGuard…</p>
           </div>
         </AppLayout>
       }
