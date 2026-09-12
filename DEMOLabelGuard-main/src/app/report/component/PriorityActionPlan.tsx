@@ -1,9 +1,13 @@
 'use client';
 
 import React from 'react';
-import { XCircle, AlertCircle, CheckCircle2, ListChecks } from 'lucide-react';
+import { XCircle, AlertCircle, CheckCircle2, ListChecks, MapPin } from 'lucide-react';
 import type { ProductAnalysis } from '@/lib/mockData';
-import { buildPriorityActionPlan, type PriorityAction } from '@/lib/complianceInsights';
+import {
+  buildPriorityActionPlan,
+  describeConfidenceSource,
+  type PriorityAction,
+} from '@/lib/complianceInsights';
 
 const BORDER_CLASS: Record<PriorityAction['status'], string> = {
   FLAG: 'border-l-4 border-l-flag',
@@ -41,7 +45,7 @@ function ActionGroup({
             key={action.id}
             className={`p-3 rounded-lg bg-muted/30 border border-border ${BORDER_CLASS[action.status]}`}
           >
-            {/* What's wrong */}
+            {/* What was found */}
             <p className="text-sm font-semibold text-navy leading-snug">
               {action.issue}
               {action.declarationField ? (
@@ -51,6 +55,14 @@ function ActionGroup({
                 </span>
               ) : null}
             </p>
+
+            {/* Evidence — where this was found, if resolvable */}
+            {action.evidenceRegion && (
+              <p className="text-[11px] text-muted-foreground/80 mt-1 flex items-center gap-1">
+                <MapPin size={10} className="flex-shrink-0" />
+                {action.evidenceRegion}
+              </p>
+            )}
 
             {/* Why it matters */}
             {action.explanation && (
@@ -66,6 +78,17 @@ function ActionGroup({
               <span className="font-bold uppercase tracking-wide text-[10px] mr-1">Do this:</span>
               {action.recommendation}
             </p>
+
+            {/* Source of confidence — distinguishes what the AI detected,
+                what the deterministic rule engine validated, and whether
+                real evidence was located on the image, so the finding
+                isn't trusted on a single opaque percentage. */}
+            {action.confidenceSource && (
+              <p className="text-[10px] text-muted-foreground/60 mt-1.5 pt-1.5 border-t border-border/60 leading-relaxed">
+                <span className="font-semibold uppercase tracking-wide mr-1">Source:</span>
+                {describeConfidenceSource(action.confidenceSource)}
+              </p>
+            )}
           </li>
         ))}
       </ul>

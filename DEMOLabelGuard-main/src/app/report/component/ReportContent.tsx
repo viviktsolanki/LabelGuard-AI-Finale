@@ -33,7 +33,11 @@ import {
   PDF_COLORS,
   type ReportBlock,
 } from '@/lib/pdfExport';
-import { getComplianceInsights } from '@/lib/complianceInsights';
+import {
+  getComplianceInsights,
+  getConfidenceSource,
+  describeConfidenceSource,
+} from '@/lib/complianceInsights';
 import SmartSummaryCard from './SmartSummaryCard';
 import PriorityActionPlan from './PriorityActionPlan';
 
@@ -383,6 +387,12 @@ function buildReportPdfBlocks(product: ProductAnalysis): ReportBlock[] {
       indent: 10,
       color: PDF_COLORS.accent,
     });
+    blocks.push({
+      type: 'text',
+      text: `Source of confidence: ${describeConfidenceSource(getConfidenceSource(f, decl))}`,
+      indent: 10,
+      color: PDF_COLORS.muted,
+    });
     blocks.push({ type: 'spacer' });
   });
 
@@ -477,7 +487,8 @@ function generateReportText(product: ProductAnalysis): string {
     ...sortFindingsBySeverity(product.findings).map((f) => {
       const decl = product.declarations.find((d) => d.id === f.declarationId);
       const source = decl ? describeEvidenceSource(product, decl.source) : null;
-      return `[${f.severity}] ${f.title}\n  Check: ${f.ruleCheck}\n  Detected: ${f.detectedText}\n  Confidence: ${f.confidence}%\n  Evidence: ${f.evidenceRegion}${source ? ` (${source})` : ''}\n  Explanation: ${f.explanation}\n  Recommendation: ${f.recommendation}\n`;
+      const confidenceSource = describeConfidenceSource(getConfidenceSource(f, decl));
+      return `[${f.severity}] ${f.title}\n  Check: ${f.ruleCheck}\n  Detected: ${f.detectedText}\n  Confidence: ${f.confidence}%\n  Evidence: ${f.evidenceRegion}${source ? ` (${source})` : ''}\n  Explanation: ${f.explanation}\n  Recommendation: ${f.recommendation}\n  Source of confidence: ${confidenceSource}\n`;
     }),
     '',
     'DISCLAIMER',
@@ -848,6 +859,7 @@ export default function ReportContent() {
               const source = declaration
                 ? describeEvidenceSource(product, declaration.source)
                 : null;
+              const confidenceSource = getConfidenceSource(finding, declaration);
               return (
                 <div
                   key={finding.id}
@@ -930,6 +942,17 @@ export default function ReportContent() {
                       </span>
                     </p>
                   </div>
+
+                  {/* Source of confidence — what the AI detected vs. what
+                      the deterministic rule engine validated vs. whether
+                      real evidence was located, so trust isn't reduced to
+                      one number. */}
+                  <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                    <span className="font-semibold uppercase tracking-wide mr-1">
+                      Source of confidence:
+                    </span>
+                    {describeConfidenceSource(confidenceSource)}
+                  </p>
                 </div>
               );
             })}

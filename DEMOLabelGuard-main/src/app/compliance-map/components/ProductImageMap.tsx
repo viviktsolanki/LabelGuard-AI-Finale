@@ -187,7 +187,7 @@ export default function ProductImageMap({
   }, []);
 
   return (
-    <div className="card overflow-hidden">
+        <div id="compliance-map-image" className="card overflow-hidden scroll-mt-24">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30 flex-wrap gap-2">
         <div className="flex items-center gap-2">

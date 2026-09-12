@@ -188,6 +188,12 @@ interface AIAnalysisResponse {
   success: boolean;
   analysis?: string;
   error?: string;
+  // Present only when the AI service was temporarily unavailable AND the
+  // caller explicitly opted in via ?demo_fallback=true on this page's
+  // URL — see src/app/api/analyze/route.ts. Never set for a normal
+  // real-AI response.
+  demoFallback?: boolean;
+  demoFallbackReason?: string;
 }
 
 export default function AnalysisContent() {
@@ -314,9 +320,19 @@ export default function AnalysisContent() {
 
       // Call the real AI during the declaration extraction stage.
       if (stage.id === 'stage-declarations') {
+        // Opt-in emergency mode only: forwards ?demo_fallback=true from
+        // this page's own URL as a query param on the API call. Real AI
+        // is still always attempted first server-side (see
+        // src/app/api/analyze/route.ts) — this only controls what
+        // happens if every real-AI attempt fails.
+        const analyzeUrl =
+          searchParams.get('demo_fallback') === 'true'
+            ? '/api/analyze?demo_fallback=true'
+            : '/api/analyze';
+
         let response: Response;
         try {
-          response = await fetch('/api/analyze', {
+          response = await fetch(analyzeUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -347,6 +363,18 @@ export default function AnalysisContent() {
           }
 
           setAiAnalysis(data.analysis || '');
+
+          // Only ever true when ?demo_fallback=true was explicitly set
+          // AND every real-AI attempt failed server-side — never for a
+          // normal real-AI response. Surfaced via the existing toast
+          // pattern (already used for x402 payment errors above) so the
+          // fallback is never silent, without adding a new UI element.
+          if (data.demoFallback) {
+            toast(
+              data.demoFallbackReason ||
+                'AI service busy — showing demo data because demo fallback was explicitly enabled.'
+            );
+          }
 
           // The real AI response is JSON, so count the extracted
           // top-level declaration fields that contain a value.
@@ -448,7 +476,7 @@ export default function AnalysisContent() {
 
     setComplete(true);
     setCurrentStageIndex(-1);
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     if (mode === 'upload') {

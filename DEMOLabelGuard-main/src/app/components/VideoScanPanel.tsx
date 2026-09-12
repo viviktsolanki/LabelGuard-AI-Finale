@@ -18,7 +18,7 @@
  * parallel "video analysis" pipeline exists.
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Upload, Video, X, AlertCircle, RotateCcw, ArrowRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -52,9 +52,10 @@ interface VideoScanPanelProps {
 type PanelStage = 'choose' | 'extracting' | 'review' | 'extraction-error';
 
 const STAGE_LABEL: Record<FrameExtractionProgress['stage'], string> = {
-  sampling: 'Scanning video for usable frames…',
-  selecting: 'Choosing the best views…',
-  extracting: 'Extracting final images…',
+  reading: 'Reading video…',
+  sampling: 'Finding clear frames…',
+  selecting: 'Selecting best views…',
+  extracting: 'Preparing analysis…',
 };
 
 export default function VideoScanPanel({
@@ -67,10 +68,11 @@ export default function VideoScanPanel({
   const [stage, setStage] = useState<PanelStage>('choose');
   const [showRecorder, setShowRecorder] = useState(false);
   const [progress, setProgress] = useState<FrameExtractionProgress>({
-    stage: 'sampling',
+    stage: 'reading',
     fraction: 0,
   });
   const [frames, setFrames] = useState<ExtractedFrame[]>([]);
+  const [qualityWarning, setQualityWarning] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [lastVideoFile, setLastVideoFile] = useState<File | null>(null);
 
@@ -78,16 +80,41 @@ export default function VideoScanPanel({
     framesToRevoke.forEach((f) => URL.revokeObjectURL(f.previewUrl));
   }, []);
 
+  // MEMORY FIX: each extracted frame creates its own preview blob URL (see
+  // extractFramesFromVideo in videoFrames.ts). Every path that stopped
+  // showing a given set of frames already revoked them (handleRetry,
+  // handleRemoveFrame) EXCEPT accepting the frames and simply switching
+  // back to Photo Scan mode (UploadZoneSection unmounts this panel once
+  // `onFramesAccepted` runs) or navigating away mid-review — in both
+  // cases `frames` was discarded with its blob URLs still allocated,
+  // leaking one blob per extracted frame for the rest of the page's
+  // lifetime. `framesRef` lets the unmount cleanup below see the latest
+  // frames without re-subscribing the effect on every state change.
+  const framesRef = useRef<ExtractedFrame[]>(frames);
+  framesRef.current = frames;
+
+  useEffect(() => {
+    return () => {
+      framesRef.current.forEach((f) => URL.revokeObjectURL(f.previewUrl));
+    };
+  }, []);
+
   const runExtraction = useCallback(
     async (videoFile: File) => {
       setLastVideoFile(videoFile);
       setStage('extracting');
-      setProgress({ stage: 'sampling', fraction: 0 });
+      setProgress({ stage: 'reading', fraction: 0 });
       setErrorMessage('');
+      setQualityWarning(null);
 
       try {
-        const extracted = await extractFramesFromVideo(videoFile, maxFrames, setProgress);
+        const { frames: extracted, qualityWarning: warning } = await extractFramesFromVideo(
+          videoFile,
+          maxFrames,
+          setProgress
+        );
         setFrames(extracted);
+        setQualityWarning(warning);
         setStage('review');
       } catch (err) {
         const message =
@@ -140,6 +167,7 @@ export default function VideoScanPanel({
   const handleRetry = useCallback(() => {
     revokeFramePreviews(frames);
     setFrames([]);
+    setQualityWarning(null);
     setStage('choose');
     setErrorMessage('');
   }, [frames, revokeFramePreviews]);
@@ -152,7 +180,13 @@ export default function VideoScanPanel({
       return;
     }
     onFramesAccepted(frames.map((f) => ({ file: f.file, timestampSeconds: f.timestampSeconds })));
-  }, [frames, minRequiredFrames, onFramesAccepted]);
+    // Revoking a blob URL doesn't affect the underlying File/Blob data
+    // (UploadZoneSection creates its own fresh preview URLs from `f.file`
+    // above), so these review-stage previews are safe to release now
+    // rather than leaking until the unmount cleanup above runs.
+    revokeFramePreviews(frames);
+    setFrames([]);
+  }, [frames, minRequiredFrames, onFramesAccepted, revokeFramePreviews]);
 
   return (
     <div className="space-y-4">
@@ -266,6 +300,13 @@ export default function VideoScanPanel({
               uploaded photos.
             </p>
           </div>
+
+          {qualityWarning && (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200">
+              <AlertCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-amber-800 leading-relaxed">{qualityWarning}</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {frames.map((frame, index) => (

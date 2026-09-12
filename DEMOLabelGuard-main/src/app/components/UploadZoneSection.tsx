@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Upload,
@@ -78,6 +78,31 @@ export default function UploadZoneSection() {
     null
   );
   const additionalInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // MEMORY FIX: front/back/additional preview blob URLs were only ever
+  // revoked when explicitly replaced or cleared by the user (see
+  // clearUpload/handleAdditionalFile/etc. below) — never when this
+  // component itself unmounts (e.g. client-side navigation away from the
+  // scan page after Analyze, or before it, with images already loaded).
+  // Refs mirror the latest values so a single unmount-only effect can
+  // revoke whatever is still live without re-subscribing on every state
+  // change or needing every setter to also update a cleanup dependency.
+  const frontPreviewUrlRef = useRef<string | null>(null);
+  const backPreviewUrlRef = useRef<string | null>(null);
+  const additionalSlotsRef = useRef<AdditionalSlot[]>([]);
+  frontPreviewUrlRef.current = frontPreviewUrl;
+  backPreviewUrlRef.current = backPreviewUrl;
+  additionalSlotsRef.current = additionalSlots;
+
+  useEffect(() => {
+    return () => {
+      if (frontPreviewUrlRef.current) URL.revokeObjectURL(frontPreviewUrlRef.current);
+      if (backPreviewUrlRef.current) URL.revokeObjectURL(backPreviewUrlRef.current);
+      additionalSlotsRef.current.forEach((slot) => {
+        if (slot.previewUrl) URL.revokeObjectURL(slot.previewUrl);
+      });
+    };
+  }, []);
 
   const handleFile = useCallback(
     (file: File, side: 'front' | 'back', videoTimestampSeconds: number | null = null) => {

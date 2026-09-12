@@ -7,10 +7,17 @@ import {
   ChevronUp,
   Code2,
   MapPin,
+  ShieldCheck,
   Sparkles,
   Video,
 } from 'lucide-react';
 import { imageLabelFor, type ImageId } from '@/lib/mockData';
+import {
+  validateBharatCompliance,
+  type BharatValidatorField,
+  type BharatValidatorInput,
+  type RuleValidationResult,
+} from '@/lib/bharatValidator';
 
 interface Props {
   /** Raw JSON string returned by /api/analyze's `analysis` field. */
@@ -87,6 +94,26 @@ export default function ExtractedLabelData({ aiAnalysisJson, videoTimestampByIma
       extraction = {};
     }
 
+    // Bharat Validator runs on the same raw extraction shown here, purely
+    // to surface a "Rule validated" badge alongside the AI-detected value
+    // — it never changes what's displayed as the AI-extracted value/
+    // confidence above. See src/lib/bharatValidator.
+    const bharatInput: BharatValidatorInput = {};
+    (Object.keys(extraction) as (keyof BharatValidatorInput)[]).forEach((key) => {
+      const raw = extraction[key];
+      if (!raw) return;
+      const field: BharatValidatorField = {
+        value: raw.value ?? null,
+        confidence: typeof raw.confidence === 'number' ? raw.confidence : 0,
+      };
+      bharatInput[key] = field;
+    });
+    const ruleValidations = validateBharatCompliance(bharatInput);
+    const ruleValidationByKey: Partial<Record<string, RuleValidationResult>> = {};
+    ruleValidations.forEach((r) => {
+      ruleValidationByKey[r.fieldKey] = r;
+    });
+
     return FIELD_LABELS.map(({ key, label }) => {
       const raw = extraction[key];
       const value = (raw?.value ?? '').toString().trim();
@@ -103,7 +130,11 @@ export default function ExtractedLabelData({ aiAnalysisJson, videoTimestampByIma
         source: raw?.source ?? null,
         confidencePct,
         hasEvidence: Boolean(raw?.evidence && raw.evidence.image),
-        conflict: typeof raw?.conflict === 'string' && raw.conflict.trim().length > 0 ? raw.conflict.trim() : null,
+        conflict:
+          typeof raw?.conflict === 'string' && raw.conflict.trim().length > 0
+            ? raw.conflict.trim()
+            : null,
+        ruleValidation: ruleValidationByKey[key] ?? null,
       };
     });
   }, [aiAnalysisJson]);
@@ -111,11 +142,12 @@ export default function ExtractedLabelData({ aiAnalysisJson, videoTimestampByIma
   return (
     <div className="p-4 rounded-xl bg-muted/50 border border-border">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <Sparkles size={14} className="text-accent" />
-          <p className="text-sm font-bold text-navy">
-            AI Extracted Label Data
-          </p>
+          <p className="text-sm font-bold text-navy">AI Extracted Label Data</p>
+          <span className="hidden sm:inline text-[11px] text-muted-foreground/80 italic">
+            · value/confidence = AI detected, badge = deterministically rule validated
+          </span>
         </div>
 
         <button
@@ -177,13 +209,33 @@ export default function ExtractedLabelData({ aiAnalysisJson, videoTimestampByIma
               )}
 
               {f.hasValue && (
-                <span className={`text-xs font-tabular font-bold ${confidenceColor(f.confidencePct)}`}>
+                <span
+                  className={`text-xs font-tabular font-bold ${confidenceColor(f.confidencePct)}`}
+                >
                   {f.confidencePct}%
                 </span>
               )}
 
               {f.hasEvidence && (
-                <MapPin size={12} className="text-accent" aria-label="Evidence location available" />
+                <MapPin
+                  size={12}
+                  className="text-accent"
+                  aria-label="Evidence location available"
+                />
+              )}
+
+              {f.ruleValidation && (
+                <span
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border flex items-center gap-1 ${
+                    f.ruleValidation.status === 'PASS'
+                      ? 'bg-pass/10 text-pass border-pass/20'
+                      : 'bg-review/10 text-review border-review/20'
+                  }`}
+                  title={`Rule validated (${f.ruleValidation.ruleCheck}): ${f.ruleValidation.message}`}
+                >
+                  <ShieldCheck size={11} />
+                  Rule validated
+                </span>
               )}
             </div>
           </div>

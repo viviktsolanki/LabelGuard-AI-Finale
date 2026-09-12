@@ -6,7 +6,12 @@ import {
   isSupportedLanguageCode,
   type LanguageCode,
 } from '@/lib/languages';
-import { GEMINI_MODEL, getGeminiClient, getGeminiErrorMessage } from '@/lib/gemini';
+import {
+  GEMINI_MODEL,
+  GEMINI_REQUEST_TIMEOUT_MS,
+  getGeminiClient,
+  getGeminiErrorMessage,
+} from '@/lib/gemini';
 
 const COPILOT_UNAVAILABLE_MESSAGE = 'Ask LabelGuard is temporarily unavailable. Please try again.';
 
@@ -126,6 +131,10 @@ export async function POST(request: Request) {
       // role) — same content, different transport.
       config: {
         systemInstruction: instructions,
+        // Bounded wall-clock timeout — see gemini.ts. Without this a
+        // stalled upstream call had no ceiling, leaving the chat widget's
+        // "thinking" state spinning indefinitely with no honest error.
+        httpOptions: { timeout: GEMINI_REQUEST_TIMEOUT_MS },
       },
       // Gemini uses role "model" for prior assistant turns rather than
       // "assistant"; everything else about the conversation shape

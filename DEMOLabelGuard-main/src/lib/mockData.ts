@@ -1,3 +1,5 @@
+import type { RuleValidationResult } from '@/lib/bharatValidator';
+
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
 export type DeclarationStatus = 'PASS' | 'REVIEW' | 'FLAG';
@@ -41,6 +43,20 @@ export const imageLabelFor = (id: ImageId | string): string => {
   if (match) return `View ${match[1]}`;
 
   return id;
+};
+
+/**
+ * Resolves an `ImageId` to the actual image URL on a product, or `null` if
+ * that view doesn't exist on this product (e.g. a demo product with only a
+ * front image, or an additional-view id the user never captured). Used
+ * anywhere a piece of evidence needs to be rendered against the specific
+ * image it was actually found on, rather than assuming it's always the
+ * front image.
+ */
+export const imageUrlForId = (product: ProductAnalysis, id: ImageId): string | null => {
+  if (id === 'front') return product.imageUrl;
+  if (id === 'back') return product.backImageUrl ?? null;
+  return product.additionalImages?.find((img) => img.id === id)?.url ?? null;
 };
 
 /** A single optional additional product view (side panel, top, bottom,
@@ -101,6 +117,15 @@ export interface Declaration {
   explanation: string;
   /** What the user should do */
   recommendedAction: string;
+  /**
+   * Deterministic Bharat Validator outcome for this declaration's field,
+   * when a rule exists for it (see src/lib/bharatValidator). `undefined`
+   * for demo/mockData products (which predate the validator) and `null`
+   * for a real upload where the validator has no rule for this field or
+   * the field had no value to check. Additive — never required, never
+   * used in place of `status`/`explanation` above, only alongside them.
+   */
+  validatorCheck?: RuleValidationResult | null;
 }
 
 export interface Finding {
@@ -161,6 +186,13 @@ export interface ProductAnalysis {
   flagCount: number;
   /** Raw AI extraction JSON string — only present for real uploads. Shown behind a "Technical details" toggle. */
   rawAiExtraction?: string;
+  /**
+   * Full set of deterministic Bharat Validator results for this product
+   * (see src/lib/bharatValidator), independent of which declaration they
+   * ended up attached to. Additive — absent for demo/mockData products
+   * and for real uploads where no rule matched any extracted field.
+   */
+  ruleValidations?: RuleValidationResult[];
 }
 
 // ─── PRODUCT A — COMPLIANT: Sunrise Basmati Rice ─────────────────────────────

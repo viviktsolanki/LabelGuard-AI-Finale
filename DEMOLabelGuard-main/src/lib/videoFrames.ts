@@ -18,12 +18,19 @@
  * HONESTY NOTE (do not remove): the "quality" and "duplicate" checks below
  * are cheap heuristics, not real computer vision. Sharpness is approximated
  * from a downscaled grayscale gradient (a fast proxy for variance-of-
- * Laplacian, not the real thing), and similarity is an 8x8 average-hash —
- * both can be wrong on flat-but-sharp labels, noisy low-light video, or
- * subtly different frames that hash identically. There is no true 3D
- * understanding of the product here: frames are chosen by spreading picks
- * across time + maximizing a hash-distance from frames already picked,
- * which approximates "different views" without knowing what a "view" is.
+ * Laplacian, not the real thing), exposure is approximated from mean pixel
+ * brightness (not a histogram/metering model a camera app would use), and
+ * similarity is an 8x8 average-hash — all can be wrong on flat-but-sharp
+ * labels, noisy low-light video, or subtly different frames that hash
+ * identically. There is no true 3D understanding of the product here:
+ * frames are chosen by spreading picks across time + maximizing a
+ * hash-distance from frames already picked, which approximates "different
+ * views" without knowing what a "view" is. The blur/exposure REJECTION
+ * thresholds below are relative to the candidates actually sampled from
+ * THIS video (median-based), not fixed absolute "good photo" thresholds,
+ * because raw gradient magnitude and brightness both depend heavily on the
+ * scene/lighting/camera — and they progressively relax rather than ever
+ * failing a scan outright (see selectUsableCandidates).
  */
 
 // ─── LIMITS ──────────────────────────────────────────────────────────────
@@ -66,19 +73,77 @@ const FRAME_EXTRACTION_MAX_DIMENSION_PX = 1920;
  * than one small canvas in memory at a time. */
 const CANDIDATE_SAMPLE_MAX_DIMENSION_PX = 160;
 
-/** Pass-1 sampling interval. Every 0.4s over a 30s video is ~75 candidates
- * max — cheap at 160px each, one at a time, never all held simultaneously. */
-const CANDIDATE_SAMPLE_INTERVAL_SECONDS = 0.4;
-
 /** Hard ceiling on candidates regardless of duration, as a defensive bound
  * against unexpected metadata (e.g. a duration that reads longer than the
  * validated max due to a container/browser quirk). */
-const MAX_CANDIDATES = 90;
+const MAX_CANDIDATES = 24;
 
 /** Average-hash Hamming distance (0-64) below which two candidate frames
  * are treated as "too similar to both be worth keeping." Chosen loosely —
  * see honesty note at the top of this file. */
 const DUPLICATE_HASH_DISTANCE_THRESHOLD = 8;
+
+// ─── DURATION-ADAPTIVE BUDGETS ──────────────────────────────────────────
+// How many pass-1 candidates we sample, and how many final frames we aim
+// for, both scale with the clip's length: a 5s clip realistically shows
+// 2-3 distinct views no matter how many frames you sample from it, while a
+// 25s slow rotation can genuinely contain 5+ distinct, useful views. These
+// are targets, not guarantees — the actual final count is always further
+// bounded by (a) the real pipeline capacity passed in as `maxFrames`, and
+// (b) how many candidates actually survive quality filtering.
+
+/** Video duration (seconds) at/under which a clip is treated as "short". */
+const SHORT_VIDEO_MAX_SECONDS = 10;
+/** Video duration (seconds) at/under which a clip is treated as "medium"
+ * (above SHORT_VIDEO_MAX_SECONDS, at/under this is "medium"; above it is
+ * "long", up to MAX_VIDEO_DURATION_SECONDS). */
+const MEDIUM_VIDEO_MAX_SECONDS = 20;
+
+/** Pass-1 candidate sample counts per duration tier — matches the product
+ * spec's suggested scale (short ~8-12, medium ~12-20, long capped). */
+const CANDIDATE_BUDGET_SHORT = 10;
+const CANDIDATE_BUDGET_MEDIUM = 18;
+const CANDIDATE_BUDGET_LONG = MAX_CANDIDATES;
+
+/** Target number of FINAL frames to select per duration tier, before
+ * clamping to the real pipeline capacity (`maxFrames`). A short clip is
+ * deliberately not pushed to fill every available slot — better to return
+ * 3 genuinely distinct, decent views than pad out to 6 with near-repeats. */
+const FINAL_TARGET_SHORT = 3;
+const FINAL_TARGET_MEDIUM = 5;
+const FINAL_TARGET_LONG = 5;
+
+function candidateBudgetForDuration(durationSeconds: number): number {
+  if (durationSeconds <= SHORT_VIDEO_MAX_SECONDS) return CANDIDATE_BUDGET_SHORT;
+  if (durationSeconds <= MEDIUM_VIDEO_MAX_SECONDS) return CANDIDATE_BUDGET_MEDIUM;
+  return CANDIDATE_BUDGET_LONG;
+}
+
+function finalFrameTargetForDuration(durationSeconds: number, cappedMaxFrames: number): number {
+  const target =
+    durationSeconds <= SHORT_VIDEO_MAX_SECONDS
+      ? FINAL_TARGET_SHORT
+      : durationSeconds <= MEDIUM_VIDEO_MAX_SECONDS
+        ? FINAL_TARGET_MEDIUM
+        : FINAL_TARGET_LONG;
+  return Math.max(1, Math.min(target, cappedMaxFrames));
+}
+
+// ─── QUALITY REJECTION THRESHOLDS ───────────────────────────────────────
+
+/** Mean grayscale brightness (0-255) below which a frame is considered
+ * too dark to be usable — e.g. camera covered, lens obstructed, or the
+ * label rotated into shadow. */
+const DARK_MEAN_BRIGHTNESS_THRESHOLD = 28;
+/** Mean grayscale brightness (0-255) above which a frame is considered
+ * blown out / overexposed — e.g. direct glare off a glossy label. */
+const BRIGHT_MEAN_BRIGHTNESS_THRESHOLD = 232;
+
+/** A candidate's sharpness must be at least this fraction of THIS video's
+ * own median sharpness to avoid being flagged as "obviously blurry" —
+ * relative, not absolute, because raw gradient magnitude depends heavily
+ * on the label's own contrast/texture (see honesty note above). */
+const BLUR_REJECT_RATIO_OF_MEDIAN = 0.35;
 
 /** Timeout for a single `seeked` event before we give up on that
  * timestamp. Prevents an infinite spinner if the browser's decoder stalls
@@ -146,9 +211,21 @@ export interface ExtractedFrame {
 }
 
 export interface FrameExtractionProgress {
-  stage: 'sampling' | 'selecting' | 'extracting';
+  stage: 'reading' | 'sampling' | 'selecting' | 'extracting';
   /** 0-1 */
   fraction: number;
+}
+
+/** Result of the full pipeline. `qualityWarning` is set (non-fatal) only
+ * when quality filtering had to fully relax — i.e. NONE of the sampled
+ * candidates met both the sharpness and exposure bar, so the frames
+ * returned are simply the best available from a genuinely poor source
+ * clip, not frames that passed the quality checks. `frames` is never
+ * empty on success (see no-usable-frames handling below) and never
+ * contains fabricated/synthetic data — always real extracted stills. */
+export interface FrameExtractionResult {
+  frames: ExtractedFrame[];
+  qualityWarning: string | null;
 }
 
 // ─── VALIDATION ──────────────────────────────────────────────────────────
@@ -259,17 +336,20 @@ type FrameHash = Uint8Array;
 interface Candidate {
   timestampSeconds: number;
   sharpness: number;
+  meanBrightness: number;
   hash: FrameHash;
 }
 
-/** Downscales the current video frame onto a tiny canvas and returns both
- * a sharpness score and a perceptual hash. Only one small canvas/ImageData
- * exists at a time — nothing here is retained across candidates. */
+/** Downscales the current video frame onto a tiny canvas and returns a
+ * sharpness score, a mean-brightness exposure reading, and a perceptual
+ * hash. Only one small canvas/ImageData exists at a time — nothing here is
+ * retained across candidates. */
 function scoreCurrentFrame(
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement
 ): {
   sharpness: number;
+  meanBrightness: number;
   hash: FrameHash;
 } {
   const vw = video.videoWidth || 1;
@@ -281,19 +361,26 @@ function scoreCurrentFrame(
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return { sharpness: 0, hash: new Uint8Array(64) };
+  if (!ctx) return { sharpness: 0, meanBrightness: 128, hash: new Uint8Array(64) };
 
   ctx.drawImage(video, 0, 0, w, h);
   const { data } = ctx.getImageData(0, 0, w, h);
 
-  // Grayscale buffer, reused for both sharpness and hashing.
+  // Grayscale buffer, reused for sharpness, exposure, and hashing.
   const gray = new Float32Array(w * h);
+  let brightnessSum = 0;
   for (let i = 0; i < w * h; i++) {
     const r = data[i * 4];
     const g = data[i * 4 + 1];
     const b = data[i * 4 + 2];
-    gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+    const value = 0.299 * r + 0.587 * g + 0.114 * b;
+    gray[i] = value;
+    brightnessSum += value;
   }
+  // Exposure proxy: mean grayscale brightness across the whole downscaled
+  // frame. Cheap pixel statistics, not a real metering model — see
+  // honesty note at the top of this file.
+  const meanBrightness = w * h > 0 ? brightnessSum / (w * h) : 128;
 
   // Sharpness proxy: mean absolute gradient magnitude (fast stand-in for
   // variance-of-Laplacian — see honesty note at top of file).
@@ -329,7 +416,7 @@ function scoreCurrentFrame(
     hash[i] = small[i] >= mean ? 1 : 0;
   }
 
-  return { sharpness, hash };
+  return { sharpness, meanBrightness, hash };
 }
 
 function hammingDistance(a: FrameHash, b: FrameHash): number {
@@ -348,8 +435,13 @@ async function sampleCandidates(
   const canvas = document.createElement('canvas');
   const candidates: Candidate[] = [];
 
-  const rawCount = Math.floor(durationSeconds / CANDIDATE_SAMPLE_INTERVAL_SECONDS);
-  const sampleCount = Math.max(1, Math.min(MAX_CANDIDATES, rawCount));
+  // Duration-adaptive candidate budget (see DURATION-ADAPTIVE BUDGETS
+  // above) rather than a fixed sampling interval — a 5s clip and a 25s
+  // clip get proportionally different amounts of pass-1 sampling effort.
+  const sampleCount = Math.max(
+    1,
+    Math.min(MAX_CANDIDATES, candidateBudgetForDuration(durationSeconds))
+  );
   // Avoid sampling the very first/last few frames, which are frequently
   // hand motion blur as the user starts/stops recording.
   const startPad = Math.min(0.3, durationSeconds * 0.05);
@@ -367,13 +459,68 @@ async function sampleCandidates(
       continue;
     }
 
-    const { sharpness, hash } = scoreCurrentFrame(video, canvas);
-    candidates.push({ timestampSeconds: t, sharpness, hash });
+    const { sharpness, meanBrightness, hash } = scoreCurrentFrame(video, canvas);
+    candidates.push({ timestampSeconds: t, sharpness, meanBrightness, hash });
 
     onProgress?.({ stage: 'sampling', fraction: (i + 1) / sampleCount });
   }
 
   return candidates;
+}
+
+// ─── QUALITY FILTERING (blur + exposure rejection) ──────────────────────
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function isExposureAcceptable(meanBrightness: number): boolean {
+  return (
+    meanBrightness >= DARK_MEAN_BRIGHTNESS_THRESHOLD &&
+    meanBrightness <= BRIGHT_MEAN_BRIGHTNESS_THRESHOLD
+  );
+}
+
+/**
+ * Rejects obviously blurry and obviously mis-exposed candidates BEFORE
+ * diversity selection runs, so `selectCandidates` never has to choose
+ * between two frames that are merely "less bad" than each other. Never
+ * fails the scan by itself: if strict filtering leaves fewer usable
+ * candidates than we actually need, it progressively relaxes (first drop
+ * the blur filter, then the exposure filter) rather than returning too
+ * few frames — matching the "use best available, never fabricate, never
+ * hard-fail" requirement. Returns the usable candidates plus whether full
+ * relaxation was needed, so the caller can surface an honest warning.
+ */
+function selectUsableCandidates(
+  candidates: Candidate[],
+  minNeeded: number
+): { usable: Candidate[]; hadToRelaxFully: boolean } {
+  const medianSharpness = median(candidates.map((c) => c.sharpness));
+  const blurThreshold = medianSharpness * BLUR_REJECT_RATIO_OF_MEDIAN;
+
+  const passesBoth = candidates.filter(
+    (c) => c.sharpness >= blurThreshold && isExposureAcceptable(c.meanBrightness)
+  );
+  if (passesBoth.length >= minNeeded) {
+    return { usable: passesBoth, hadToRelaxFully: false };
+  }
+
+  // Relax exposure first — a slightly dark/bright but SHARP frame is still
+  // useful for OCR; a sharp-but-unreadable frame is not.
+  const passesSharpOnly = candidates.filter((c) => c.sharpness >= blurThreshold);
+  if (passesSharpOnly.length >= minNeeded) {
+    return { usable: passesSharpOnly, hadToRelaxFully: false };
+  }
+
+  // Full relaxation: use whatever was actually sampled. The video itself
+  // is genuinely poor quality throughout (or minNeeded exceeds what a
+  // short clip could ever provide) — better to hand back the best of a
+  // bad batch than to fail the scan outright.
+  return { usable: candidates, hadToRelaxFully: true };
 }
 
 // ─── SELECTION ───────────────────────────────────────────────────────────
@@ -483,8 +630,10 @@ export async function extractFramesFromVideo(
   file: File,
   maxFrames: number,
   onProgress?: (progress: FrameExtractionProgress) => void
-): Promise<ExtractedFrame[]> {
+): Promise<FrameExtractionResult> {
   validateVideoFile(file);
+
+  onProgress?.({ stage: 'reading', fraction: 0 });
 
   const cappedMaxFrames = Math.max(1, Math.min(maxFrames, ABSOLUTE_MAX_FINAL_FRAMES));
   const objectUrl = URL.createObjectURL(file);
@@ -504,15 +653,27 @@ export async function extractFramesFromVideo(
         reject(new VideoProcessingError('decode-failed', VIDEO_ERROR_MESSAGES['decode-failed']));
     });
 
+    onProgress?.({ stage: 'reading', fraction: 1 });
+
     const candidates = await sampleCandidates(video, metadata.durationSeconds, onProgress);
 
     if (candidates.length === 0) {
       throw new VideoProcessingError('no-usable-frames', VIDEO_ERROR_MESSAGES['no-usable-frames']);
     }
 
+    // How many distinct final views we're aiming for, adapted to this
+    // clip's actual length and clamped to the real pipeline capacity —
+    // see DURATION-ADAPTIVE BUDGETS above.
+    const finalTarget = finalFrameTargetForDuration(metadata.durationSeconds, cappedMaxFrames);
+
+    // Reject obviously blurry / obviously mis-exposed candidates (with
+    // graceful, non-fatal relaxation — see selectUsableCandidates) before
+    // diversity selection ever sees them.
+    const { usable, hadToRelaxFully } = selectUsableCandidates(candidates, finalTarget);
+
     onProgress?.({ stage: 'selecting', fraction: 1 });
 
-    const selected = selectCandidates(candidates, cappedMaxFrames);
+    const selected = selectCandidates(usable, finalTarget);
 
     const canvas = document.createElement('canvas');
     const frames: ExtractedFrame[] = [];
@@ -543,7 +704,12 @@ export async function extractFramesFromVideo(
       throw new VideoProcessingError('no-usable-frames', VIDEO_ERROR_MESSAGES['no-usable-frames']);
     }
 
-    return frames;
+    return {
+      frames,
+      qualityWarning: hadToRelaxFully
+        ? 'These frames may be blurry or poorly lit throughout the video — LabelGuard used the best available, but a retake with more light or a slower rotation may work better.'
+        : null,
+    };
   } finally {
     URL.revokeObjectURL(objectUrl);
   }

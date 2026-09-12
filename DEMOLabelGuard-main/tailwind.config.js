@@ -74,6 +74,7 @@ module.exports = {
         'finding': '0 2px 8px rgba(30, 64, 175, 0.12)',
       },
       animation: {
+        'evidence-pulse': 'evidencePulse 1.8s ease-in-out infinite',
         'scan-line': 'scanLine 2s ease-in-out infinite',
         'pulse-ring': 'pulseRing 2s ease-out infinite',
         'fade-in-up': 'fadeInUp 0.4s ease-out forwards',

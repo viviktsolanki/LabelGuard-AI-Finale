@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import {
-  GEMINI_MODEL,
-  getGeminiClient,
+  generateWithRetryAndFallback,
   getGeminiErrorMessage,
+  isRetryableGeminiError,
   parseImageDataUrl,
   stripJsonFences,
 } from "@/lib/gemini";
+import { buildDemoFallbackAnalysis } from "@/lib/demoFallback";
 
 const ANALYSIS_UNAVAILABLE_MESSAGE =
   "Label analysis is temporarily unavailable. Please try again.";
@@ -79,10 +80,14 @@ export async function POST(request: Request) {
 
     const validImageIds = allImages.map((img) => `"${img.id}"`).join(" | ");
 
-    const ai = getGeminiClient();
+    // Opt-in emergency mode only: ?demo_fallback=true on the request URL.
+    // Never read from the JSON body, so it can't be toggled by anything
+    // in the payment/x402 flow — this is purely a query-string escape
+    // hatch for when the real AI call is exhausted (see catch block).
+    const demoFallbackRequested =
+      new URL(request.url).searchParams.get("demo_fallback") === "true";
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const buildAnalyzeParams = () => ({
       contents: [
         {
           role: "user",
@@ -184,34 +189,81 @@ Evidence coordinates (bounding box):
       },
     });
 
-    const rawText = response.text;
-
-    if (!rawText) {
-      return NextResponse.json(
-        { success: false, error: ANALYSIS_UNAVAILABLE_MESSAGE },
-        { status: 502 }
-      );
-    }
-
-    // Defensive: validate the model actually returned parseable JSON
-    // before handing it to the frontend, which does its own
-    // `JSON.parse(data.analysis)`. Never fabricate/patch missing
-    // compliance data if parsing fails — return an honest error instead.
-    const candidate = stripJsonFences(rawText);
+    // Real AI attempt: primary model, then one short-backoff retry, then
+    // (only if configured via env) one attempt against a fallback
+    // model/backup key. See src/lib/gemini.ts for the exact bounded
+    // sequence — there is no unbounded retry loop here.
     try {
-      JSON.parse(candidate);
-    } catch {
-      console.error("LabelGuard AI analysis error: model returned non-JSON output", rawText);
+      const { result: candidate, attempt, model, usedBackupKey } =
+        await generateWithRetryAndFallback(buildAnalyzeParams, (response) => {
+          const rawText = response.text;
+          if (!rawText) {
+            throw new Error("Model returned no text.");
+          }
+
+          // Defensive: validate the model actually returned parseable
+          // JSON before handing it to the frontend, which does its own
+          // `JSON.parse(data.analysis)`. Never fabricate/patch missing
+          // compliance data if parsing fails — this throws so the outer
+          // catch can return an honest error instead.
+          const parsedCandidate = stripJsonFences(rawText);
+          try {
+            JSON.parse(parsedCandidate);
+          } catch {
+            console.error(
+              "LabelGuard AI analysis error: model returned non-JSON output",
+              rawText
+            );
+            throw new Error("Model returned non-JSON output.");
+          }
+
+          return parsedCandidate;
+        });
+
+      if (attempt !== "primary") {
+        console.info(
+          `LabelGuard AI: /api/analyze succeeded on "${attempt}" attempt (model=${model}, usedBackupKey=${usedBackupKey}).`
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        analysis: candidate,
+      });
+    } catch (aiError) {
+      console.error("LabelGuard AI analysis error:", aiError);
+
+      // Emergency mode ONLY: real AI was already attempted (primary +
+      // retry + any configured fallback, all above) and every attempt
+      // failed with a genuinely temporary error. Only then, and only
+      // when the caller explicitly opted in via ?demo_fallback=true, do
+      // we substitute an existing demo product's data — clearly flagged
+      // as such, never presented as if it were this user's real result.
+      if (demoFallbackRequested && isRetryableGeminiError(aiError)) {
+        const demo = buildDemoFallbackAnalysis(category);
+
+        console.warn(
+          `LabelGuard AI: /api/analyze real AI exhausted retries; demo_fallback=true, returning demo data from "${demo.sourceProductId}".`
+        );
+
+        return NextResponse.json({
+          success: true,
+          analysis: demo.analysisJson,
+          demoFallback: true,
+          demoFallbackReason:
+            "The AI service was temporarily unavailable, so this request explicitly fell back to demo data instead of your real label.",
+          demoFallbackSource: demo.sourceProductId,
+        });
+      }
+
       return NextResponse.json(
-        { success: false, error: ANALYSIS_UNAVAILABLE_MESSAGE },
-        { status: 502 }
+        {
+          success: false,
+          error: getGeminiErrorMessage(aiError, ANALYSIS_UNAVAILABLE_MESSAGE),
+        },
+        { status: 500 }
       );
     }
-
-    return NextResponse.json({
-      success: true,
-      analysis: candidate,
-    });
   } catch (error) {
     console.error("LabelGuard AI analysis error:", error);
 

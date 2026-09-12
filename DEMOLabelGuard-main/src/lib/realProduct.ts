@@ -12,6 +12,13 @@ import {
   type ImageId,
   type ProductAnalysis,
 } from '@/lib/mockData';
+import {
+  validateBharatCompliance,
+  type BharatValidatorField,
+  type BharatValidatorFieldKey,
+  type BharatValidatorInput,
+  type RuleValidationResult,
+} from '@/lib/bharatValidator';
 
 /**
  * Real-upload products are stored under this storage key prefix and
@@ -140,21 +147,111 @@ interface FieldSpec {
 
 // Mirrors the JSON schema requested from the model in /api/analyze.
 const FIELD_SPECS: FieldSpec[] = [
-  { key: 'product_name', field: 'Product Name', ruleId: 'product_name_required', ruleCheck: 'RULE-001: Product name declaration', mandatory: true },
-  { key: 'net_quantity', field: 'Net Quantity', ruleId: 'net_quantity_required', ruleCheck: 'RULE-002: Net quantity declaration', mandatory: true },
-  { key: 'mrp', field: 'MRP', ruleId: 'mrp_required', ruleCheck: 'RULE-003: MRP declaration', mandatory: true },
-  { key: 'manufacturer', field: 'Manufacturer', ruleId: 'manufacturer_required', ruleCheck: 'RULE-004: Manufacturer declaration', mandatory: true },
-  { key: 'expiry_date', field: 'Best Before / Expiry', ruleId: 'date_required', ruleCheck: 'RULE-005: Best before / expiry declaration', mandatory: true },
-  { key: 'customer_care', field: 'Consumer Care', ruleId: 'consumer_care_required', ruleCheck: 'RULE-006: Consumer care declaration', mandatory: true },
-  { key: 'batch_number', field: 'Batch / Lot Number', ruleId: 'batch_required', ruleCheck: 'RULE-008: Batch / lot number declaration', mandatory: true },
-  { key: 'brand', field: 'Brand', ruleId: 'brand_optional', ruleCheck: 'RULE-010: Brand name', mandatory: false },
-  { key: 'manufacturing_date', field: 'Manufacturing Date', ruleId: 'mfg_date_optional', ruleCheck: 'RULE-011: Manufacturing date', mandatory: false },
-  { key: 'packaging_date', field: 'Packaging Date', ruleId: 'packaging_date_optional', ruleCheck: 'RULE-011b: Packaging date', mandatory: false },
-  { key: 'use_by_date', field: 'Use By Date', ruleId: 'use_by_date_optional', ruleCheck: 'RULE-011c: Use by date', mandatory: false },
-  { key: 'ingredients', field: 'Ingredients', ruleId: 'ingredients_optional', ruleCheck: 'RULE-012: Ingredients declaration', mandatory: false },
-  { key: 'license_numbers', field: 'License Numbers', ruleId: 'license_optional', ruleCheck: 'RULE-013: License number declaration', mandatory: false },
-  { key: 'warnings', field: 'Warnings', ruleId: 'warnings_optional', ruleCheck: 'RULE-014: Warning statements', mandatory: false },
-  { key: 'other_visible_declarations', field: 'Other Declarations', ruleId: 'other_optional', ruleCheck: 'RULE-015: Other visible declarations', mandatory: false },
+  {
+    key: 'product_name',
+    field: 'Product Name',
+    ruleId: 'product_name_required',
+    ruleCheck: 'RULE-001: Product name declaration',
+    mandatory: true,
+  },
+  {
+    key: 'net_quantity',
+    field: 'Net Quantity',
+    ruleId: 'net_quantity_required',
+    ruleCheck: 'RULE-002: Net quantity declaration',
+    mandatory: true,
+  },
+  {
+    key: 'mrp',
+    field: 'MRP',
+    ruleId: 'mrp_required',
+    ruleCheck: 'RULE-003: MRP declaration',
+    mandatory: true,
+  },
+  {
+    key: 'manufacturer',
+    field: 'Manufacturer',
+    ruleId: 'manufacturer_required',
+    ruleCheck: 'RULE-004: Manufacturer declaration',
+    mandatory: true,
+  },
+  {
+    key: 'expiry_date',
+    field: 'Best Before / Expiry',
+    ruleId: 'date_required',
+    ruleCheck: 'RULE-005: Best before / expiry declaration',
+    mandatory: true,
+  },
+  {
+    key: 'customer_care',
+    field: 'Consumer Care',
+    ruleId: 'consumer_care_required',
+    ruleCheck: 'RULE-006: Consumer care declaration',
+    mandatory: true,
+  },
+  {
+    key: 'batch_number',
+    field: 'Batch / Lot Number',
+    ruleId: 'batch_required',
+    ruleCheck: 'RULE-008: Batch / lot number declaration',
+    mandatory: true,
+  },
+  {
+    key: 'brand',
+    field: 'Brand',
+    ruleId: 'brand_optional',
+    ruleCheck: 'RULE-010: Brand name',
+    mandatory: false,
+  },
+  {
+    key: 'manufacturing_date',
+    field: 'Manufacturing Date',
+    ruleId: 'mfg_date_optional',
+    ruleCheck: 'RULE-011: Manufacturing date',
+    mandatory: false,
+  },
+  {
+    key: 'packaging_date',
+    field: 'Packaging Date',
+    ruleId: 'packaging_date_optional',
+    ruleCheck: 'RULE-011b: Packaging date',
+    mandatory: false,
+  },
+  {
+    key: 'use_by_date',
+    field: 'Use By Date',
+    ruleId: 'use_by_date_optional',
+    ruleCheck: 'RULE-011c: Use by date',
+    mandatory: false,
+  },
+  {
+    key: 'ingredients',
+    field: 'Ingredients',
+    ruleId: 'ingredients_optional',
+    ruleCheck: 'RULE-012: Ingredients declaration',
+    mandatory: false,
+  },
+  {
+    key: 'license_numbers',
+    field: 'License Numbers',
+    ruleId: 'license_optional',
+    ruleCheck: 'RULE-013: License number declaration',
+    mandatory: false,
+  },
+  {
+    key: 'warnings',
+    field: 'Warnings',
+    ruleId: 'warnings_optional',
+    ruleCheck: 'RULE-014: Warning statements',
+    mandatory: false,
+  },
+  {
+    key: 'other_visible_declarations',
+    field: 'Other Declarations',
+    ruleId: 'other_optional',
+    ruleCheck: 'RULE-015: Other visible declarations',
+    mandatory: false,
+  },
 ];
 
 const sourceRegionLabel = (source: AiField['source']): string => {
@@ -220,7 +317,9 @@ const readabilityLabelFor = (confidence: number): Declaration['readabilityLabel'
  * unavailable" in that case.
  */
 const isKnownImageId = (image: unknown): image is ImageId =>
-  image === 'front' || image === 'back' || (typeof image === 'string' && isAdditionalImageId(image));
+  image === 'front' ||
+  image === 'back' ||
+  (typeof image === 'string' && isAdditionalImageId(image));
 
 const sanitizeEvidence = (raw: AiEvidence | null | undefined): EvidenceRegion | null => {
   if (!raw || !isKnownImageId(raw.image)) return null;
@@ -268,9 +367,7 @@ export interface BuildRealProductInput {
   aiAnalysisJson: string;
 }
 
-export const buildRealProductAnalysis = (
-  input: BuildRealProductInput
-): ProductAnalysis => {
+export const buildRealProductAnalysis = (input: BuildRealProductInput): ProductAnalysis => {
   let extraction: AiExtraction = {};
 
   try {
@@ -299,6 +396,38 @@ export const buildRealProductAnalysis = (
   const declarations: Declaration[] = [];
   const findings: Finding[] = [];
 
+  // ── Bharat Validator: deterministic, non-AI rule checks ────────────────
+  // Built once from the same raw extraction, then merged per-field below.
+  // See src/lib/bharatValidator for the rules themselves; this file only
+  // wires "AI extracted → deterministic check → merged declaration"
+  // together and never re-implements a rule's logic inline.
+  const BHARAT_FIELD_KEYS: BharatValidatorFieldKey[] = [
+    'license_numbers',
+    'net_quantity',
+    'mrp',
+    'customer_care',
+    'batch_number',
+    'manufacturing_date',
+    'packaging_date',
+    'expiry_date',
+    'use_by_date',
+  ];
+  const bharatInput: BharatValidatorInput = {};
+  BHARAT_FIELD_KEYS.forEach((key) => {
+    const raw = extraction[key];
+    if (!raw) return;
+    const field: BharatValidatorField = {
+      value: raw.value ?? null,
+      confidence: typeof raw.confidence === 'number' ? raw.confidence : 0,
+    };
+    bharatInput[key] = field;
+  });
+  const ruleValidations = validateBharatCompliance(bharatInput);
+  const ruleValidationByFieldKey: Partial<Record<string, RuleValidationResult>> = {};
+  ruleValidations.forEach((result) => {
+    ruleValidationByFieldKey[result.fieldKey] = result;
+  });
+
   FIELD_SPECS.forEach((spec) => {
     const raw = extraction[spec.key];
     const value = (raw?.value ?? '').toString().trim();
@@ -312,11 +441,27 @@ export const buildRealProductAnalysis = (
     const conflictNote = typeof raw?.conflict === 'string' ? raw.conflict.trim() : '';
     const hasConflict = conflictNote.length > 0;
 
+    // Only ever set for a field this project already has a Bharat
+    // Validator rule for (see BHARAT_FIELD_KEYS above) — fields like
+    // product_name/brand/ingredients simply have no entry and this stays
+    // undefined, exactly like today.
+    const validatorResult = ruleValidationByFieldKey[spec.key] ?? null;
+    const validatorFailed = Boolean(validatorResult && validatorResult.status !== 'PASS');
+
     let status = statusFor(hasValue, spec.mandatory, confidence);
     // A conflicting read across images means the field is not actually
     // reliable even if one occurrence looked confident — the deterministic
     // layer (not the AI) downgrades a PASS to REVIEW so a human checks it.
     if (hasConflict && status === 'PASS') {
+      status = 'REVIEW';
+    }
+    // Same precedent, applied to the Bharat Validator: a deterministic
+    // format/structure failure downgrades an AI-confidence PASS to
+    // REVIEW so a human checks it. It never escalates to FLAG on its own
+    // and never touches a status the AI-confidence path already flagged
+    // for review/flag — this is additive scrutiny, not a replacement
+    // decision-maker, and it can only make the outcome more cautious.
+    if (validatorFailed && status === 'PASS') {
       status = 'REVIEW';
     }
 
@@ -330,19 +475,25 @@ export const buildRealProductAnalysis = (
 
     let explanation = !hasValue
       ? `${spec.field} was not detected with sufficient confidence in any of the submitted images. ${spec.mandatory ? 'This declaration is required.' : ''}`.trim()
-      : `${spec.field} extracted as "${value}" from the ${region.toLowerCase()} at ${confidencePct}% confidence.`;
+      : `AI detected: ${spec.field} extracted as "${value}" from the ${region.toLowerCase()} at ${confidencePct}% confidence.`;
 
     if (hasConflict) {
       explanation += ` A conflict was flagged: ${conflictNote}. Manual verification required.`;
     }
 
+    if (validatorResult) {
+      explanation += ` Rule validated (${validatorResult.ruleCheck}): ${validatorResult.message}`;
+    }
+
     const recommendedAction = hasConflict
       ? `Manually verify ${spec.field.toLowerCase()} — a conflict was flagged: ${conflictNote}`
-      : status === 'PASS'
-        ? 'No action required.'
-        : !hasValue
-          ? `Manual verification required. Ensure ${spec.field.toLowerCase()} is clearly printed and legible.`
-          : `Verify ${spec.field.toLowerCase()} is clearly legible; extraction confidence was below the review threshold.`;
+      : validatorFailed
+        ? `Verify ${spec.field.toLowerCase()} — rule validation flagged: ${validatorResult!.message}`
+        : status === 'PASS'
+          ? 'No action required.'
+          : !hasValue
+            ? `Manual verification required. Ensure ${spec.field.toLowerCase()} is clearly printed and legible.`
+            : `Verify ${spec.field.toLowerCase()} is clearly legible; extraction confidence was below the review threshold.`;
 
     const declaration: Declaration = {
       id: `decl-${spec.key}`,
@@ -364,6 +515,7 @@ export const buildRealProductAnalysis = (
       ruleCheck: spec.ruleCheck,
       explanation,
       recommendedAction,
+      validatorCheck: validatorResult,
     };
 
     declarations.push(declaration);
@@ -372,9 +524,7 @@ export const buildRealProductAnalysis = (
       findings.push({
         id: `finding-${spec.key}`,
         declarationId: declaration.id,
-        title: !hasValue
-          ? `${spec.field} not detected`
-          : `${spec.field} needs review`,
+        title: !hasValue ? `${spec.field} not detected` : `${spec.field} needs review`,
         severity: status,
         ruleId: spec.ruleId,
         ruleCheck: spec.ruleCheck,
@@ -399,9 +549,7 @@ export const buildRealProductAnalysis = (
 
   const withValue = declarations.filter((d) => d.value !== 'Not confidently detected');
   const avgConfidence = withValue.length
-    ? Math.round(
-        withValue.reduce((sum, d) => sum + d.confidence, 0) / withValue.length
-      )
+    ? Math.round(withValue.reduce((sum, d) => sum + d.confidence, 0) / withValue.length)
     : 0;
 
   const scoreBreakdown: ComplianceScoreBreakdown = {
@@ -410,8 +558,7 @@ export const buildRealProductAnalysis = (
     extractionConfidence: avgConfidence,
     placementVisibility: withValue.length
       ? Math.round(
-          (withValue.filter((d) => d.sourceRegion !== 'Not detected').length /
-            withValue.length) *
+          (withValue.filter((d) => d.sourceRegion !== 'Not detected').length / withValue.length) *
             100
         )
       : 0,
@@ -483,6 +630,7 @@ export const buildRealProductAnalysis = (
     reviewCount,
     flagCount,
     rawAiExtraction: input.aiAnalysisJson,
+    ruleValidations,
   };
 };
 

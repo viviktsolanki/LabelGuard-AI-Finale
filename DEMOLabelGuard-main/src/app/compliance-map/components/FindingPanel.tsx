@@ -1,7 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronUp, Filter } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  ShieldCheck,
+} from 'lucide-react';
 import { type Declaration, type Finding, type DeclarationStatus } from '@/lib/mockData';
 
 interface Props {
@@ -200,6 +208,20 @@ export default function FindingsPanel({
                               {decl.confidence}%
                             </span>
                           </div>
+
+                          {/* Deterministic rule-validated indicator — only
+                              shown when the Bharat Validator actually ran a
+                              structural check on this field's value (see
+                              src/lib/bharatValidator); distinct from the
+                              rule id below, which every field has. */}
+                          {decl.validatorCheck && (
+                            <span
+                              title={`Rule validated (${decl.validatorCheck.ruleCheck}): ${decl.validatorCheck.message}`}
+                              className="flex items-center gap-0.5 text-[10px] font-semibold text-accent flex-shrink-0"
+                            >
+                              <ShieldCheck size={11} />
+                            </span>
+                          )}
 
                           {/* Rule check short label */}
                           {finding && (

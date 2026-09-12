@@ -8,7 +8,14 @@ interface CameraCaptureProps {
   onClose: () => void;
 }
 
-type CameraState = 'idle' | 'requesting' | 'active' | 'captured' | 'denied' | 'unavailable' | 'error';
+type CameraState =
+  | 'idle'
+  | 'requesting'
+  | 'active'
+  | 'captured'
+  | 'denied'
+  | 'unavailable'
+  | 'error';
 
 export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -19,6 +26,17 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  // Native aspect ratio (width / height) of the ACTIVE video track, read
+  // directly from the live <video> element once its metadata has loaded.
+  // This — not a hardcoded guess — is what the preview container is sized
+  // to, so the box the user frames their shot in always has exactly the
+  // same aspect ratio as the raw frame capturePhoto() will read from the
+  // same <video> element. That equality is what makes "what you saw" and
+  // "what got captured" the same image: with object-fit: cover, a mismatch
+  // between the container's aspect ratio and the video's native aspect
+  // ratio is exactly what causes the browser to crop the preview to a
+  // different region than the full frame the canvas captures.
+  const [previewAspectRatio, setPreviewAspectRatio] = useState<number | null>(null);
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -42,7 +60,22 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
 
     video.srcObject = streamRef.current;
 
+    // Read the ACTUAL negotiated frame size once it's known, and size the
+    // preview container to that exact aspect ratio. "ideal" constraints
+    // are only a hint — the browser/camera can (and on many phones does)
+    // deliver a different native resolution/orientation than requested, so
+    // this must come from the live video element, not from the constraints
+    // we asked for.
+    const applyAspectRatioFromVideo = () => {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (w > 0 && h > 0) {
+        setPreviewAspectRatio(w / h);
+      }
+    };
+
     const handleLoadedMetadata = () => {
+      applyAspectRatioFromVideo();
       video.play().catch(() => {
         // play() rejection is non-fatal; autoPlay attribute handles most cases
       });
@@ -50,8 +83,9 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
 
-    // If metadata already loaded (stream was fast), play immediately
+    // If metadata already loaded (stream was fast), apply/play immediately
     if (video.readyState >= 1) {
+      applyAspectRatioFromVideo();
       video.play().catch(() => {});
     }
 
@@ -69,11 +103,34 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
     setCameraState('requesting');
     setErrorMessage('');
 
+    // Decide whether this is a "phone-shaped" viewport WITHOUT user-agent
+    // sniffing: a coarse (touch) pointer combined with a narrow viewport is
+    // a reliable, spec-based signal for a handheld device, and matches the
+    // same breakpoint the rest of the app treats as mobile. This is only
+    // used to pick which orientation to ASK the camera for — the preview
+    // itself is always sized from the real, negotiated video dimensions
+    // above, so an imperfect guess here can't cause a preview/capture
+    // mismatch, only a less-ideal initial framing.
+    const preferPortrait =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches &&
+      window.innerWidth < window.innerHeight;
+
+    // Seed the container with a reasonable guess matching what we're about
+    // to request, so there's no flash of the wrong shape before the first
+    // 'loadedmetadata' event corrects it to the camera's real dimensions.
+    setPreviewAspectRatio(preferPortrait ? 9 / 16 : 16 / 9);
+
     const tryGetStream = async (facingMode?: string): Promise<MediaStream> => {
+      const videoConstraints: MediaTrackConstraints = preferPortrait
+        ? { width: { ideal: 1080 }, height: { ideal: 1920 }, aspectRatio: { ideal: 9 / 16 } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 16 / 9 } };
+      if (facingMode) {
+        videoConstraints.facingMode = facingMode;
+      }
       const constraints: MediaStreamConstraints = {
-        video: facingMode
-          ? { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: videoConstraints,
         audio: false,
       };
       return navigator.mediaDevices.getUserMedia(constraints);
@@ -98,10 +155,7 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
       const error = err as { name?: string; message?: string };
       if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
         setCameraState('denied');
-      } else if (
-        error?.name === 'NotFoundError' ||
-        error?.name === 'DevicesNotFoundError'
-      ) {
+      } else if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') {
         setCameraState('unavailable');
       } else if (error?.name === 'NotReadableError' || error?.name === 'AbortError') {
         setErrorMessage('Camera is already in use by another application.');
@@ -117,6 +171,12 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    // Canvas is sized to the video's full native frame, and the preview
+    // container is sized (via previewAspectRatio, set from this same
+    // video element) to that exact aspect ratio. Because both share the
+    // same aspect ratio, object-fit: cover in the preview scales rather
+    // than crops, so this full, uncropped frame is what the user actually
+    // saw — no separate crop math is needed to keep them in sync.
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
     const ctx = canvas.getContext('2d');
@@ -135,6 +195,28 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
       0.92
     );
   }, [stopStream]);
+
+  // Shared sizing for both the live preview and the captured-photo review
+  // box, so they are always the exact same shape as each other (and as the
+  // video/canvas they're displaying). Landscape ratios (>= 1, typical of
+  // desktop webcams) simply fill the available modal width, same as
+  // before. Portrait ratios (< 1, typical of phone cameras held upright)
+  // additionally get a max-width derived FROM the aspect ratio itself —
+  // width = 65dvh * ratio — which caps the resulting height at 65dvh
+  // without ever setting width/height independently of the ratio, so
+  // there's no risk of the box drifting out of sync with the video's real
+  // aspect ratio (which is what would reintroduce the preview/capture
+  // crop mismatch this fix addresses).
+  const previewBoxStyle = useCallback((ratio: number | null): React.CSSProperties => {
+    const effectiveRatio = ratio ?? 16 / 9;
+    const isPortrait = effectiveRatio < 1;
+    return {
+      aspectRatio: effectiveRatio,
+      width: '100%',
+      maxWidth: isPortrait ? `calc(65dvh * ${effectiveRatio.toFixed(4)})` : undefined,
+      margin: isPortrait ? '0 auto' : undefined,
+    };
+  }, []);
 
   const retake = useCallback(() => {
     if (capturedUrl) URL.revokeObjectURL(capturedUrl);
@@ -210,7 +292,7 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
             <>
               <div
                 className="relative rounded-xl overflow-hidden bg-black"
-                style={{ aspectRatio: '16/9' }}
+                style={previewBoxStyle(previewAspectRatio)}
               >
                 <video
                   ref={videoRef}
@@ -251,7 +333,7 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
             <>
               <div
                 className="relative rounded-xl overflow-hidden bg-black"
-                style={{ aspectRatio: '16/9' }}
+                style={previewBoxStyle(previewAspectRatio)}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -295,8 +377,8 @@ export default function CameraCapture({ onCapture, onClose }: CameraCaptureProps
               </div>
               <div className="w-full p-3 rounded-xl bg-amber-50 border border-amber-200">
                 <p className="text-xs text-amber-800 text-center">
-                  Alternatively, use the <strong>Browse files</strong> button to upload a photo
-                  from your device.
+                  Alternatively, use the <strong>Browse files</strong> button to upload a photo from
+                  your device.
                 </p>
               </div>
               <button
